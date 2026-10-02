@@ -59,22 +59,10 @@ export function Toolbar(p: ToolbarProps) {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 8 }}>
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 4,
-            background: JNJ.red,
-            color: '#fff',
-            display: 'grid',
-            placeItems: 'center',
-            fontWeight: 700,
-            fontSize: 13,
-            letterSpacing: 0.5,
-          }}
-        >
-          C
-        </div>
+        {/* The application's own macOS icon, cropped to the artwork and
+            supplied at 2x. The rounded corners live in the PNG, so no CSS
+            radius here -- adding one would double-round and clip it. */}
+        <img src="/clear-mark.png" alt="CLEAR" style={{ width: 26, height: 26, display: 'block' }} />
         <span style={{ fontWeight: 600, color: JNJ.ink, letterSpacing: 1 }}>CLEAR</span>
         <span style={{ color: JNJ.textMuted, fontSize: 12 }}>MPS 数据整合平台</span>
       </div>
