@@ -35,8 +35,18 @@ type GridRow struct {
 	Seq      int64                 `json:"seq"`
 	Index    [mps.IndexCols]string `json:"index"`
 	Weeks    []string              `json:"weeks"`
+	WeekMeta []CellMeta            `json:"weekMeta"`
 	FileName string                `json:"fileName"`
 	SrcRow   int                   `json:"srcRow"`
+}
+
+// CellMeta carries what the grid needs beyond the number itself: the fill
+// colour the source cell was painted with, and the note attached to it. Both
+// are aligned to the week columns, one entry per week.
+type CellMeta struct {
+	Color   string `json:"color,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	Author  string `json:"author,omitempty"`
 }
 
 // GridResult is a page plus the totals the grid needs.
@@ -198,6 +208,12 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 	if q.SortDesc {
 		dir = "DESC"
 	}
+	// Loaded before the row cursor opens: the pool deliberately holds one
+	// connection, so a second query cannot run while rows are streaming.
+	colors, err := s.fillColors()
+	if err != nil {
+		return nil, err
+	}
 	// seq breaks ties so paging is stable.
 	sqlText := fmt.Sprintf(`SELECT %s FROM %s%s ORDER BY %s %s, seq ASC LIMIT ? OFFSET ?`,
 		columnList(staging, weekCodes), quoteIdent(table), clause, order, dir)
@@ -212,7 +228,7 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 
 	out := &GridResult{Rows: []GridRow{}, Total: total, Page: page, PageSize: size}
 	for rows.Next() {
-		gr, err := scanGridRow(rows, staging, weekCodes)
+		gr, err := scanGridRow(rows, staging, weekCodes, colors)
 		if err != nil {
 			return nil, err
 		}
@@ -230,12 +246,16 @@ func columnList(staging bool, weekCodes []string) string {
 		for _, wc := range weekCodes {
 			cols = append(cols, WeekColumnName(wc))
 		}
+	} else {
+		// The staging area keeps every week in one JSON array instead of one
+		// column per week; it has to be selected or the grid shows blanks.
+		cols = append(cols, "weeks")
 	}
-	cols = append(cols, "file_name", "src_row")
+	cols = append(cols, "style_ids", "comments", "file_name", "src_row")
 	return strings.Join(cols, ",")
 }
 
-func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string) (GridRow, error) {
+func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[int]string) (GridRow, error) {
 	var gr GridRow
 	seq := &gr.Seq
 	scans := make([]any, 0, 4+mps.IndexCols+len(weekCodes))
@@ -245,15 +265,19 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string) (GridRow, err
 		scans = append(scans, &texts[i])
 	}
 	var weekVals []sql.NullString
+	var weeksJSON sql.NullString
 	if !staging {
 		weekVals = make([]sql.NullString, len(weekCodes))
 		for i := range weekVals {
 			scans = append(scans, &weekVals[i])
 		}
+	} else {
+		scans = append(scans, &weeksJSON)
 	}
+	var styleJSON, commentsJSON sql.NullString
 	var fileName sql.NullString
 	var srcRow sql.NullInt64
-	scans = append(scans, &fileName, &srcRow)
+	scans = append(scans, &styleJSON, &commentsJSON, &fileName, &srcRow)
 	if err := rows.Scan(scans...); err != nil {
 		return gr, err
 	}
@@ -261,12 +285,99 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string) (GridRow, err
 		gr.Index[i] = texts[i].String
 	}
 	gr.Weeks = make([]string, len(weekCodes))
-	for i, v := range weekVals {
-		gr.Weeks[i] = nullToCell(v)
+	if staging {
+		var values []string
+		_ = json.Unmarshal([]byte(weeksJSON.String), &values)
+		for i := range gr.Weeks {
+			if i < len(values) {
+				gr.Weeks[i] = values[i]
+			}
+		}
+	} else {
+		for i, v := range weekVals {
+			gr.Weeks[i] = nullToCell(v)
+		}
 	}
+	gr.WeekMeta = buildWeekMeta(weekCodes, styleJSON.String, commentsJSON.String, colors)
 	gr.FileName = fileName.String
 	gr.SrcRow = int(srcRow.Int64)
 	return gr, nil
+}
+
+// buildWeekMeta aligns the row's interned style ids and its notes with the week
+// columns. Both are stored against absolute column numbers, so the week at
+// index i corresponds to entry FirstWeekCol-1+i.
+func buildWeekMeta(weekCodes []string, styleJSON, commentsJSON string, colors map[int]string) []CellMeta {
+	var styleIDs []int
+	if styleJSON != "" {
+		_ = json.Unmarshal([]byte(styleJSON), &styleIDs)
+	}
+	var comments mps.CommentMap
+	if commentsJSON != "" {
+		_ = json.Unmarshal([]byte(commentsJSON), &comments)
+	}
+	out := make([]CellMeta, len(weekCodes))
+	for i := range weekCodes {
+		col := mps.FirstWeekCol + i
+		if col-1 < len(styleIDs) {
+			out[i].Color = colors[styleIDs[col-1]]
+		}
+		if c, ok := comments[col]; ok {
+			out[i].Comment = c.Text
+			out[i].Author = c.Author
+		}
+	}
+	return out
+}
+
+// fillColors maps every interned style id onto the background colour it paints,
+// as #RRGGBB. Styles that paint nothing are simply absent from the map, which
+// is what the grid renders as a plain cell.
+func (s *Store) fillColors() (map[int]string, error) {
+	list, err := s.LoadStyles()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int]string, len(list))
+	for _, e := range list {
+		if hex := fillColorOf(e.Sig); hex != "" {
+			out[e.ID] = hex
+		}
+	}
+	return out, nil
+}
+
+// fillColorOf reads the pattern fill out of an excelize style signature.
+func fillColorOf(sig json.RawMessage) string {
+	var st struct {
+		Fill struct {
+			Pattern int      `json:"Pattern"`
+			Color   []string `json:"Color"`
+		} `json:"Fill"`
+	}
+	if err := json.Unmarshal(sig, &st); err != nil {
+		return ""
+	}
+	if st.Fill.Pattern == 0 || len(st.Fill.Color) == 0 {
+		return ""
+	}
+	return normaliseColor(st.Fill.Color[0])
+}
+
+// normaliseColor turns the ARGB or RGB string Excel stores into a #RRGGBB CSS
+// colour, rejecting the fully transparent value.
+func normaliseColor(v string) string {
+	v = strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(v, "#")))
+	switch len(v) {
+	case 6:
+		return "#" + v
+	case 8:
+		if v[:2] == "00" {
+			return ""
+		}
+		return "#" + v[2:]
+	}
+	return ""
 }
 
 func nullToCell(v sql.NullString) string {
@@ -299,7 +410,7 @@ type ExportRow struct {
 	Weeks     []any // float64, string or nil
 	StyleIDs  []int
 	CF        mps.CFRow
-	Comments  map[int]string
+	Comments  mps.CommentMap
 	FileName  string
 	SourceRow int
 }
@@ -320,7 +431,7 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 	for _, wc := range entry.WeekCodes {
 		cols = append(cols, WeekColumnName(wc))
 	}
-	cols = append(cols, "cf_id", "file_name", "src_row", "style_ids")
+	cols = append(cols, "cf_id", "file_name", "src_row", "style_ids", "comments")
 
 	// Load the format programs up front: querying them while the row cursor
 	// is open would need a second connection, and the pool allows only one.
@@ -345,6 +456,7 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 		var fileName sql.NullString
 		var srcRow sql.NullInt64
 		var styleJSON sql.NullString
+		var commentsJSON sql.NullString
 		scans := []any{&r.Seq}
 		for i := range texts {
 			scans = append(scans, &texts[i])
@@ -352,7 +464,7 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 		for i := range weeks {
 			scans = append(scans, &weeks[i])
 		}
-		scans = append(scans, &cfID, &fileName, &srcRow, &styleJSON)
+		scans = append(scans, &cfID, &fileName, &srcRow, &styleJSON, &commentsJSON)
 		if err := rows.Scan(scans...); err != nil {
 			return nil, nil, err
 		}
@@ -368,6 +480,9 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 		if styleJSON.Valid && styleJSON.String != "" {
 			_ = json.Unmarshal([]byte(styleJSON.String), &r.StyleIDs)
 		}
+		if commentsJSON.Valid && commentsJSON.String != "" {
+			_ = json.Unmarshal([]byte(commentsJSON.String), &r.Comments)
+		}
 		if cfID.Valid {
 			if payload, ok := cfPatterns[cfID.Int64]; ok {
 				r.CF = mps.UnmarshalRow(payload)
@@ -376,6 +491,82 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 		out = append(out, r)
 	}
 	return entry, out, rows.Err()
+}
+
+// FetchStagingExportRows reads the staging area in the same shape as a
+// committed week, so 导出 works on data that has been imported but not yet
+// integrated — the merged rows the main grid is showing.
+func (s *Store) FetchStagingExportRows() (*StagingSummary, []ExportRow, error) {
+	sum, err := s.LoadStaging()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !sum.HasStaging {
+		return nil, nil, fmt.Errorf("没有待导出的临时数据")
+	}
+
+	// Loaded up front: the pool allows one connection, so a second query
+	// cannot run while the row cursor below is open.
+	cfPatterns, err := s.LoadCFPatterns()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cols := make([]string, 0, mps.IndexCols+7)
+	cols = append(cols, "seq")
+	for i := 1; i <= mps.IndexCols; i++ {
+		cols = append(cols, fmt.Sprintf("c%d", i))
+	}
+	cols = append(cols, "weeks", "style_ids", "cf_id", "comments", "file_name", "src_row")
+
+	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM stg_row WHERE batch_id=? ORDER BY seq`,
+		strings.Join(cols, ",")), sum.BatchID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var out []ExportRow
+	for rows.Next() {
+		var r ExportRow
+		var weeksJSON, styleJSON string
+		var cfID sql.NullInt64
+		var commentsJSON, fileName sql.NullString
+		var srcRow sql.NullInt64
+		texts := make([]sql.NullString, mps.IndexCols)
+		scans := []any{&r.Seq}
+		for i := range texts {
+			scans = append(scans, &texts[i])
+		}
+		scans = append(scans, &weeksJSON, &styleJSON, &cfID, &commentsJSON, &fileName, &srcRow)
+		if err := rows.Scan(scans...); err != nil {
+			return nil, nil, err
+		}
+		for i := range texts {
+			r.Index[i] = texts[i].String
+		}
+		var weeks []string
+		_ = json.Unmarshal([]byte(weeksJSON), &weeks)
+		r.Weeks = make([]any, len(sum.WeekCodes))
+		for i := range r.Weeks {
+			if i < len(weeks) {
+				r.Weeks[i] = weekValue(weeks[i])
+			}
+		}
+		_ = json.Unmarshal([]byte(styleJSON), &r.StyleIDs)
+		if commentsJSON.Valid && commentsJSON.String != "" {
+			_ = json.Unmarshal([]byte(commentsJSON.String), &r.Comments)
+		}
+		if cfID.Valid {
+			if payload, ok := cfPatterns[cfID.Int64]; ok {
+				r.CF = mps.UnmarshalRow(payload)
+			}
+		}
+		r.FileName = fileName.String
+		r.SourceRow = int(srcRow.Int64)
+		out = append(out, r)
+	}
+	return sum, out, rows.Err()
 }
 
 // decodeWeekCell turns a stored cell back into the value to write out.

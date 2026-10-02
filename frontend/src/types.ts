@@ -21,8 +21,16 @@ export interface GridRow {
   seq: number;
   index: string[];
   weeks: string[];
+  /** Aligned to weeks: the source cell's fill colour and note, if any. */
+  weekMeta: CellMeta[];
   fileName: string;
   srcRow: number;
+}
+
+export interface CellMeta {
+  color?: string;
+  comment?: string;
+  author?: string;
 }
 
 export interface GridResult {
@@ -66,6 +74,31 @@ export interface ImportResult {
   files: FileResult[];
   warnings: string[];
   durationMs: number;
+  /** 添加 stopped because one of the picked files is already in the list. */
+  needsConfirm?: boolean;
+  duplicateFiles?: string[];
+  pendingPaths?: string[];
+}
+
+/** One workbook of the current 整合清单. */
+export interface StagedFile {
+  name: string;
+  path: string;
+  size: number;
+  status: string;
+  rowsTotal: number;
+  rowsKept: number;
+  weekCode: string;
+  err?: string;
+}
+
+/** What the toolbar's 已导入文件 button shows. */
+export interface StagingFilesView {
+  hasStaging: boolean;
+  fileCount: number;
+  rowCount: number;
+  failedCount: number;
+  files: StagedFile[];
 }
 
 export interface CommitResult {
@@ -76,6 +109,11 @@ export interface CommitResult {
   fileCount: number;
   committedAt: string;
   overwrote: boolean;
+}
+
+export interface ClearResult {
+  weekCode: string;
+  rows: number;
 }
 
 export interface ExportResult {
@@ -107,6 +145,8 @@ export interface ArchiveEntry {
 }
 
 export interface AppConfig {
+  /** Schema marker so an older settings file can be brought forward once. */
+  configVersion: number;
   readColumns: number;
   locFilter: string;
   pageSize: number;

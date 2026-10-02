@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"project_clear/internal/mps"
@@ -25,13 +26,17 @@ type StagedFile struct {
 
 // StagedRow is one merged row waiting to be committed.
 type StagedRow struct {
-	FileName  string
+	FileName string
+	// FilePath identifies the workbook the row came from. 添加 uses it to
+	// replace exactly the rows of a re-added file; callers that only set
+	// FileName still work because the id is then resolved by name.
+	FilePath  string
 	SourceRow int
 	Index     [mps.IndexCols]string
 	Weeks     []string
 	StyleIDs  []int
 	CF        mps.CFRow
-	Comments  map[int]string
+	Comments  mps.CommentMap
 }
 
 // StagingInput is everything one import or add action produces.
@@ -44,6 +49,7 @@ type StagingInput struct {
 	Files       []StagedFile
 	Rows        []StagedRow
 	Dict        *mps.StyleDict
+	Dxf         *mps.DxfDict
 	TemplateSrc string // path of the workbook to store as the export template
 	TemplateNam string
 	ParamSnap   string
@@ -83,26 +89,7 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 		return nil, err
 	}
 
-	ok, failed := 0, 0
-	kept := 0
-	for _, f := range in.Files {
-		if f.Status == "ok" {
-			ok++
-			kept += f.RowsKept
-		} else {
-			failed++
-		}
-	}
-	res, err := tx.Exec(
-		`INSERT INTO batch(created_at, action, week_code, week_start, week_codes, index_names,
-		                   status, file_total, file_ok, file_fail, row_total, row_kept, param_snapshot)
-		 VALUES(?,?,?,?,?,?, 'staging', ?,?,?,?,?,?)`,
-		Now(), in.Action, in.WeekCode, in.WeekStart, string(weekCodes), string(indexNames),
-		len(in.Files), ok, failed, totalRows(in.Files), kept, in.ParamSnap)
-	if err != nil {
-		return nil, err
-	}
-	batchID, err := res.LastInsertId()
+	batchID, err := insertBatchTx(tx, in, weekCodes, indexNames)
 	if err != nil {
 		return nil, err
 	}
@@ -113,17 +100,80 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	for _, f := range in.Files {
-		if _, err := tx.Exec(
-			`INSERT INTO batch_file(batch_id, path, name, size, status, rows_total, rows_kept, week_code, err)
-			 VALUES(?,?,?,?,?,?,?,?,?)`,
-			batchID, f.Path, f.Name, f.Size, f.Status, f.RowsTotal, f.RowsKept, f.WeekCode, f.Err); err != nil {
-			return nil, err
-		}
+	if _, err := resolveDxfIDsTx(tx, in.Dxf); err != nil {
+		return nil, err
 	}
 
-	cfCache := map[string]sql.NullInt64{}
+	fileIDs, err := insertBatchFilesTx(tx, batchID, in.Files)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeStagingRowsTx(tx, batchID, 0, in.Rows, styleMap, fileIDs); err != nil {
+		return nil, err
+	}
+
+	templateID, err := storeTemplateTx(tx, batchID, in)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &StagingResult{BatchID: batchID, StyleMap: styleMap, TemplateID: templateID}, nil
+}
+
+// fileCounts summarises what one add/import action produced.
+func fileCounts(files []StagedFile) (ok, failed, kept int) {
+	for _, f := range files {
+		if f.Status == "ok" {
+			ok++
+			kept += f.RowsKept
+		} else {
+			failed++
+		}
+	}
+	return ok, failed, kept
+}
+
+// insertBatchTx creates the staging batch row itself.
+func insertBatchTx(tx *sql.Tx, in StagingInput, weekCodes, indexNames []byte) (int64, error) {
+	ok, failed, kept := fileCounts(in.Files)
+	res, err := tx.Exec(
+		`INSERT INTO batch(created_at, action, week_code, week_start, week_codes, index_names,
+		                   status, file_total, file_ok, file_fail, row_total, row_kept, param_snapshot)
+		 VALUES(?,?,?,?,?,?, 'staging', ?,?,?,?,?,?)`,
+		Now(), in.Action, in.WeekCode, in.WeekStart, string(weekCodes), string(indexNames),
+		len(in.Files), ok, failed, totalRows(in.Files), kept, in.ParamSnap)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// insertBatchFilesTx writes the per-file records and returns path -> file id.
+// The id is how a staging row is tied back to the workbook it came from, which
+// is what makes "添加同一个文件 = 覆盖它原来的数据" possible.
+func insertBatchFilesTx(tx *sql.Tx, batchID int64, files []StagedFile) (map[string]int64, error) {
+	ids := make(map[string]int64, len(files))
+	for _, f := range files {
+		res, err := tx.Exec(
+			`INSERT INTO batch_file(batch_id, path, name, size, status, rows_total, rows_kept, week_code, err)
+			 VALUES(?,?,?,?,?,?,?,?,?)`,
+			batchID, f.Path, f.Name, f.Size, f.Status, f.RowsTotal, f.RowsKept, f.WeekCode, f.Err)
+		if err != nil {
+			return nil, err
+		}
+		if id, err := res.LastInsertId(); err == nil && f.Path != "" {
+			ids[f.Path] = id
+		}
+	}
+	return ids, nil
+}
+
+// writeStagingRowsTx appends rows to a batch, numbering them from base so a
+// merge continues the existing sequence instead of restarting it.
+func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, styleMap map[int]int, fileIDs map[string]int64) error {
 	// The column list and the placeholder list are built together so the two
 	// can never drift apart.
 	stgCols := []string{"batch_id", "seq", "file_id", "file_name", "src_row"}
@@ -138,18 +188,29 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 	rowStmt, err := tx.Prepare(fmt.Sprintf(
 		`INSERT INTO stg_row(%s) VALUES (%s)`, strings.Join(stgCols, ","), strings.Join(ph, ",")))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rowStmt.Close()
 
-	for i, r := range in.Rows {
+	// Older rows only carry a file name; resolve those when the name is
+	// unambiguous inside the batch.
+	byName := map[string]int64{}
+	nameCount := map[string]int{}
+	for path, id := range fileIDs {
+		name := filepath.Base(path)
+		byName[name] = id
+		nameCount[name]++
+	}
+
+	cfCache := map[string]sql.NullInt64{}
+	for i, r := range rows {
 		weeks := r.Weeks
 		if weeks == nil {
 			weeks = []string{}
 		}
 		weeksJSON, err := json.Marshal(weeks)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		styleIDs := make([]int, len(r.StyleIDs))
 		for j, id := range r.StyleIDs {
@@ -161,7 +222,7 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 		}
 		styleJSON, err := json.Marshal(styleIDs)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		var cfID sql.NullInt64
@@ -172,7 +233,7 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 			} else {
 				id, err := cfPatternIDTx(tx, payload)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				cfCache[payload] = id
 				cfID = id
@@ -183,47 +244,161 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 		if len(r.Comments) > 0 {
 			b, err := json.Marshal(r.Comments)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			comments = string(b)
 		}
 
+		var fileID any
+		if id, ok := fileIDs[r.FilePath]; ok && r.FilePath != "" {
+			fileID = id
+		} else if id, ok := byName[r.FileName]; ok && nameCount[r.FileName] == 1 {
+			fileID = id
+		}
+
 		rowArgs := make([]any, 0, len(stgCols))
-		rowArgs = append(rowArgs, batchID, i, nil, r.FileName, r.SourceRow)
+		rowArgs = append(rowArgs, batchID, base+i, fileID, r.FileName, r.SourceRow)
 		for _, v := range r.Index {
 			rowArgs = append(rowArgs, v)
 		}
 		rowArgs = append(rowArgs, string(weeksJSON), string(styleJSON), cfID, comments)
 		if _, err := rowStmt.Exec(rowArgs...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storeTemplateTx records the export template of a batch. Returns an invalid
+// id when the batch produced none.
+func storeTemplateTx(tx *sql.Tx, batchID int64, in StagingInput) (sql.NullInt64, error) {
+	var templateID sql.NullInt64
+	if in.TemplateSrc == "" {
+		return templateID, nil
+	}
+	week := in.WeekCode
+	if _, err := tx.Exec(`DELETE FROM template WHERE week_code=?`, week); err != nil {
+		return templateID, err
+	}
+	r, err := tx.Exec(
+		`INSERT INTO template(week_code, src_name, stored_path, created_at) VALUES(?,?,?,?)`,
+		week, in.TemplateNam, in.TemplateSrc, Now())
+	if err != nil {
+		return templateID, err
+	}
+	id, err := r.LastInsertId()
+	if err != nil {
+		return templateID, err
+	}
+	templateID = sql.NullInt64{Int64: id, Valid: true}
+	if _, err := tx.Exec(`UPDATE batch SET template_id=? WHERE id=?`, id, batchID); err != nil {
+		return templateID, err
+	}
+	return templateID, nil
+}
+
+// refreshBatchTotalsTx recomputes the aggregate columns from batch_file, so a
+// merged batch reports the whole list rather than only the latest add.
+func refreshBatchTotalsTx(tx *sql.Tx, batchID int64) error {
+	_, err := tx.Exec(
+		`UPDATE batch SET
+		   file_total=(SELECT COUNT(1) FROM batch_file WHERE batch_id=?),`+
+			`  file_ok=(SELECT COUNT(1) FROM batch_file WHERE batch_id=? AND status='ok'),`+
+			`  file_fail=(SELECT COUNT(1) FROM batch_file WHERE batch_id=? AND status<>'ok'),`+
+			`  row_total=(SELECT COALESCE(SUM(rows_total),0) FROM batch_file WHERE batch_id=?),`+
+			`  row_kept=(SELECT COALESCE(SUM(rows_kept),0) FROM batch_file WHERE batch_id=?) `+
+			`WHERE id=?`,
+		batchID, batchID, batchID, batchID, batchID, batchID)
+	return err
+}
+
+// MergeStaging adds one 添加 action to the batch that is already staged.
+//
+// Files that are already in the list stay untouched unless their path is named
+// in replace: those are removed first, so re-adding the same workbook
+// overwrites its rows instead of duplicating them. Everything remains one
+// batch, which keeps the staging list, the row count and 整合 working on the
+// merged set. With nothing staged this is exactly SaveStaging.
+func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult, error) {
+	sum, err := s.LoadStaging()
+	if err != nil {
+		return nil, err
+	}
+	if !sum.HasStaging || len(in.Files) == 0 {
+		return s.SaveStaging(in)
+	}
+	if _, err := mustWeek(in.WeekCode); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if len(replace) > 0 {
+		ph := make([]string, len(replace))
+		replacedPaths := make([]any, 0, len(replace))
+		for i, p := range replace {
+			ph[i] = "?"
+			replacedPaths = append(replacedPaths, p)
+		}
+		list := strings.Join(ph, ",")
+		args := append([]any{sum.BatchID, sum.BatchID}, replacedPaths...)
+		if _, err := tx.Exec(fmt.Sprintf(
+			`DELETE FROM stg_row WHERE batch_id=? AND file_id IN
+			   (SELECT id FROM batch_file WHERE batch_id=? AND path IN (%s))`, list), args...); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(fmt.Sprintf(
+			`DELETE FROM stg_row WHERE batch_id=? AND file_id IS NULL AND file_name IN
+			   (SELECT name FROM batch_file WHERE batch_id=? AND path IN (%s))`, list), args...); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(fmt.Sprintf(
+			`DELETE FROM batch_file WHERE batch_id=? AND path IN (%s)`, list),
+			append([]any{sum.BatchID}, replacedPaths...)...); err != nil {
 			return nil, err
 		}
 	}
 
-	// Store the export template, if this batch produced one.
-	var templateID sql.NullInt64
-	if in.TemplateSrc != "" {
-		week := in.WeekCode
-		if _, err := tx.Exec(`DELETE FROM template WHERE week_code=?`, week); err != nil {
+	styleMap, err := resolveStyleIDsTx(tx, in.Dict)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := resolveDxfIDsTx(tx, in.Dxf); err != nil {
+		return nil, err
+	}
+	fileIDs, err := insertBatchFilesTx(tx, sum.BatchID, in.Files)
+	if err != nil {
+		return nil, err
+	}
+	var base int
+	if err := tx.QueryRow(
+		`SELECT COALESCE(MAX(seq),-1)+1 FROM stg_row WHERE batch_id=?`, sum.BatchID).Scan(&base); err != nil {
+		return nil, err
+	}
+	if err := writeStagingRowsTx(tx, sum.BatchID, base, in.Rows, styleMap, fileIDs); err != nil {
+		return nil, err
+	}
+	if err := refreshBatchTotalsTx(tx, sum.BatchID); err != nil {
+		return nil, err
+	}
+
+	// The first file of the list owns the export template; later adds reuse it.
+	if !sum.TemplateID.Valid {
+		tplIn := in
+		tplIn.WeekCode = sum.WeekCode
+		if _, err := storeTemplateTx(tx, sum.BatchID, tplIn); err != nil {
 			return nil, err
-		}
-		r, err := tx.Exec(
-			`INSERT INTO template(week_code, src_name, stored_path, created_at) VALUES(?,?,?,?)`,
-			week, in.TemplateNam, in.TemplateSrc, Now())
-		if err != nil {
-			return nil, err
-		}
-		if id, err := r.LastInsertId(); err == nil {
-			templateID = sql.NullInt64{Int64: id, Valid: true}
-			if _, err := tx.Exec(`UPDATE batch SET template_id=? WHERE id=?`, id, batchID); err != nil {
-				return nil, err
-			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &StagingResult{BatchID: batchID, StyleMap: styleMap, TemplateID: templateID}, nil
+	return &StagingResult{BatchID: sum.BatchID, StyleMap: styleMap, TemplateID: sum.TemplateID}, nil
 }
 
 // hashOf is the short signature key used to intern styles and format programs.
@@ -261,6 +436,39 @@ func resolveStyleIDsTx(tx *sql.Tx, dict *mps.StyleDict) (map[int]int, error) {
 			return nil, err
 		}
 		mapping[id] = dbID
+	}
+	return mapping, nil
+}
+
+// resolveDxfIDsTx stores the batch's differential formats and returns the id
+// each dictionary entry was given.
+func resolveDxfIDsTx(tx *sql.Tx, dict *mps.DxfDict) (map[int]int, error) {
+	if dict == nil {
+		return map[int]int{}, nil
+	}
+	mapping := make(map[int]int, dict.Len())
+	for id := 0; id < dict.Len(); id++ {
+		dxf, ok := dict.At(id)
+		if !ok {
+			continue
+		}
+		hash := hashOf([]byte(dxf))
+		var stored int
+		err := tx.QueryRow(`SELECT id FROM dxf_style WHERE sig_hash=?`, hash).Scan(&stored)
+		if err == sql.ErrNoRows {
+			res, err := tx.Exec(`INSERT INTO dxf_style(sig_hash, payload) VALUES(?,?)`, hash, dxf)
+			if err != nil {
+				return nil, err
+			}
+			n, err := res.LastInsertId()
+			if err != nil {
+				return nil, err
+			}
+			stored = int(n)
+		} else if err != nil {
+			return nil, err
+		}
+		mapping[id] = stored
 	}
 	return mapping, nil
 }
@@ -349,10 +557,62 @@ func (s *Store) LoadStaging() (*StagingSummary, error) {
 	return out, nil
 }
 
-// ClearStaging drops the staging batch, used when an import fails outright.
-func (s *Store) ClearStaging() error {
-	_, err := s.db.Exec(`DELETE FROM batch WHERE status='staging'`)
-	return err
+// ClearStaging drops the staging batch, used by 清空 and when an import fails
+// outright. Rows and per-file records go with it through ON DELETE CASCADE.
+//
+// The stored export template of a week travels with its data: a template whose
+// week was never integrated is temporary too, so it is dropped as well and its
+// week code is returned for the caller to delete the file copy. A committed
+// week keeps its template, because exporting that week still needs the original
+// workbook as the template.
+func (s *Store) ClearStaging() ([]string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT DISTINCT week_code FROM batch WHERE status='staging'`)
+	if err != nil {
+		return nil, err
+	}
+	var weeks []string
+	for rows.Next() {
+		var wc string
+		if err := rows.Scan(&wc); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		weeks = append(weeks, wc)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	if _, err := tx.Exec(`DELETE FROM batch WHERE status='staging'`); err != nil {
+		return nil, err
+	}
+
+	orphaned := []string{}
+	for _, wc := range weeks {
+		var committed int
+		if err := tx.QueryRow(`SELECT COUNT(1) FROM archive WHERE week_code=?`, wc).Scan(&committed); err != nil {
+			return nil, err
+		}
+		if committed > 0 {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM template WHERE week_code=?`, wc); err != nil {
+			return nil, err
+		}
+		orphaned = append(orphaned, wc)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return orphaned, nil
 }
 
 // StagedFileDetail is one row of the per-file report shown after an import.
@@ -385,6 +645,20 @@ func (s *Store) StagedFiles(batchID int64) ([]StagedFileDetail, error) {
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// StagingFiles lists the files of the batch that is currently staged. It is
+// what the toolbar's 已导入文件 button shows; an empty slice means the list is
+// empty (nothing imported, or 清空 was pressed).
+func (s *Store) StagingFiles() ([]StagedFileDetail, error) {
+	sum, err := s.LoadStaging()
+	if err != nil {
+		return nil, err
+	}
+	if !sum.HasStaging {
+		return []StagedFileDetail{}, nil
+	}
+	return s.StagedFiles(sum.BatchID)
 }
 
 var _ = strings.TrimSpace

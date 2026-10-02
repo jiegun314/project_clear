@@ -71,7 +71,6 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
 
   const weekCode = year != null && week != null ? `${String(year % 100).padStart(2, '0')}${String(week).padStart(2, '0')}` : null;
   const known = weekCode ? archive.some((e) => e.weekCode === weekCode) : false;
-  const entry = weekCode ? archive.find((e) => e.weekCode === weekCode) : undefined;
 
   return (
     <div
@@ -136,15 +135,6 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
         >
           查看
         </Button>
-        {entry && (
-          <Typography.Text style={{ fontSize: 12, color: JNJ.textMuted, lineHeight: 1.5 }}>
-            {entry.weekCode} · {entry.weekStart}
-            <br />
-            {entry.rowCount.toLocaleString()} 行 / {entry.fileCount} 个文件
-            <br />
-            整合于 {entry.committedAt}
-          </Typography.Text>
-        )}
         {year != null && !known && (
           <Tooltip title="该周尚未整合入库">
             <Typography.Text style={{ fontSize: 12, color: JNJ.warning }}>
@@ -175,7 +165,10 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
                 {e.weekCode} <span style={{ fontWeight: 400, color: JNJ.textMuted, fontSize: 12 }}>{e.weekStart}</span>
               </div>
               <div style={{ fontSize: 12, color: JNJ.text }}>
-                {e.year} 年第 {e.weekNo} 周 · {e.rowCount.toLocaleString()} 行
+                {e.year} 年第 {e.weekNo} 周 · {e.rowCount.toLocaleString()} 行 / {e.fileCount} 个文件
+              </div>
+              <div style={{ fontSize: 11, color: JNJ.textMuted }}>
+                整合于 {e.committedAt}
               </div>
             </div>
           ))

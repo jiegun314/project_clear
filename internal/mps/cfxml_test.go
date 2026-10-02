@@ -64,8 +64,9 @@ func TestRebaseTurnsNeighbourRefsIntoOffsets(t *testing.T) {
 		t.Fatalf("rebase = %q, want %q", got, want)
 	}
 	got = rows[60].Blocks[2].Rules[0].Formulas[0]
-	// $DN$56 is absolute and must survive untouched.
-	if want := "(ROUND(P#o0,0)>=P#o1*(1+$DN$56))"; got != want {
+	// $DN$56 is a row-absolute reference into the header, so it travels with
+	// the sheet: it is stored as a token and resolved on export.
+	if want := "(ROUND(P#o0,0)>=P#o1*(1+$DN$#a56))"; got != want {
 		t.Fatalf("rebase = %q, want %q", got, want)
 	}
 	if offs := rows[60].Blocks[2].Rules[0].Offsets; len(offs) != 2 || offs[0] != 0 || offs[1] != 1 {
@@ -76,10 +77,20 @@ func TestRebaseTurnsNeighbourRefsIntoOffsets(t *testing.T) {
 func TestApplyOffsetsReanchorsOntoTheNewRow(t *testing.T) {
 	rows, _ := ParseCFRows([]byte(sampleSheet))
 	rule := rows[60].Blocks[2].Rules[0]
-	// The row that used to be 60 is now 1000; its neighbour reference must
-	// follow it to 1001.
-	if got, want := applyOffsets(rule.Formulas[0], 1000), "(ROUND(P1000,0)>=P1001*(1+$DN$56))"; got != want {
+	// The row that used to be 60 is now 1000; its neighbour reference follows
+	// it to 1001, and the date row it compares against (source row 56) lands on
+	// exported row 2.
+	if got, want := applyOffsets(rule.Formulas[0], 1000), "(ROUND(P1000,0)>=P1001*(1+$DN$2))"; got != want {
 		t.Fatalf("applyOffsets = %q, want %q", got, want)
+	}
+}
+
+// A stored program written before the export started dropping the decorative
+// rows still carries "$DN$56" in full; it must be moved up too.
+func TestApplyOffsetsShiftsLiteralAbsoluteRows(t *testing.T) {
+	got := resolveRowRefs(shiftLiteralRows("(P1000,0)>=P1001*(1+$DN$56)"), 1000)
+	if want := "(P1000,0)>=P1001*(1+$DN$2)"; got != want {
+		t.Fatalf("literal shift = %q, want %q", got, want)
 	}
 }
 

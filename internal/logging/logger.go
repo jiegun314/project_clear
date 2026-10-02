@@ -51,8 +51,9 @@ func New(dir string) *Logger {
 
 func (l *Logger) write(level Level, source, format string, args ...any) {
 	e := Entry{
-		Seq:     l.next(),
-		Time:    time.Now().Format("15:04:05.000"),
+		Seq: l.next(),
+		// The log panel shows time to the second; the file keeps milliseconds.
+		Time:    time.Now().Format("15:04:05"),
 		Level:   level,
 		Source:  source,
 		Message: fmt.Sprintf(format, args...),

@@ -158,16 +158,16 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
 
         <Form.Item
           label="导出方式"
-          extra="模板改写：以首个源文件为模板改写，保留全部样式、条件格式、注释与宏；干净重建：只输出 MPS 表，不含宏"
+          extra="两种方式都只输出 MPS 页，都保留颜色、条件格式与备注"
         >
           <Radio.Group
             value={cfg.exportMode}
             onChange={(e) => setCfg({ ...cfg, exportMode: e.target.value })}
           >
-            <Radio value="template" style={{ marginBottom: 6 }}>
-              模板改写（.xlsm，保真最高）
+            <Radio value="clean" style={{ marginBottom: 6 }}>
+              纯数据（默认，.xlsx：只有表头与全部数据，不含宏）
             </Radio>
-            <Radio value="clean">干净重建（.xlsx，体积小）</Radio>
+            <Radio value="template">原文件格式（.xlsm：沿用源文件样式与宏）</Radio>
           </Radio.Group>
         </Form.Item>
 

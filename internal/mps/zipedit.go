@@ -10,11 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	dxfsOpen  = "<dxfs"
-	dxfsClose = "</dxfs>"
-)
-
 // excelize can read and write values, styles and comments faithfully, but its
 // conditional-format API loses rules, so the final sheet XML is patched after
 // the save. Rewriting a single zip entry in place is the least invasive way to
@@ -102,7 +97,8 @@ func HasPart(workbook, name string) bool {
 }
 
 // ReplaceParts rewrites the given zip entries of a workbook in place. Entries
-// that are not listed are copied with their original compressed bytes.
+// that are not listed are copied with their original compressed bytes. A nil
+// value removes the entry instead of writing it.
 func ReplaceParts(workbook string, replacements map[string][]byte) error {
 	zr, err := zip.OpenReader(workbook)
 	if err != nil {
@@ -122,6 +118,10 @@ func ReplaceParts(workbook string, replacements map[string][]byte) error {
 	seen := map[string]bool{}
 	for _, f := range zr.File {
 		newData, replace := replacements[f.Name]
+		if replace && newData == nil {
+			seen[f.Name] = true
+			continue // delete
+		}
 		if !replace {
 			// CopyRaw keeps untouched parts bit-identical.
 			rc, err := f.OpenRaw()
@@ -198,7 +198,7 @@ func InjectConditionalFormats(workbook, sheet string, rows map[int]CFRow, lastCo
 	if err != nil {
 		return err
 	}
-	stripped := StripDataAreaCF(raw)
+	stripped := StripAllCF(raw)
 	if len(rows) == 0 {
 		return ReplaceParts(workbook, map[string][]byte{part: stripped})
 	}
@@ -246,96 +246,87 @@ func insertBeforeSheetEnd(doc, fragment string) (string, error) {
 	if fragment == "" {
 		return doc, nil
 	}
-	anchors := []string{
-		"<dataValidations", "<hyperlinks", "<printOptions",
-		"<pageMargins", "<pageSetup", "<headerFooter", "<rowBreaks", "</worksheet>",
-	}
-	idx := -1
-	for _, a := range anchors {
-		if i := strings.Index(doc, a); i >= 0 && (idx < 0 || i < idx) {
-			idx = i
-		}
-	}
+	idx := cfInsertionPoint(doc)
 	if idx < 0 {
 		return "", fmt.Errorf("无法定位 </worksheet>，条件格式写入失败")
 	}
 	return doc[:idx] + fragment + doc[idx:], nil
 }
 
-// CopyDxfsInto grafts the source workbook's <dxfs> block into a clean
-// workbook's styles.xml and returns the offset applied to dxfIds.
+// cfSuccessors are the worksheet children the schema places after
+// conditionalFormatting. Inserting before the first of these that appears keeps
+// the document in schema order — Excel refuses to open a sheet whose elements
+// are out of order, even though the XML itself is well formed.
+var cfSuccessors = map[string]bool{
+	"dataValidations": true, "hyperlinks": true, "printOptions": true,
+	"pageMargins": true, "pageSetup": true, "headerFooter": true,
+	"rowBreaks": true, "colBreaks": true, "customProperties": true,
+	"cellWatches": true, "ignoredErrors": true, "smartTags": true,
+	"drawing": true, "drawingHF": true, "picture": true, "oleObjects": true,
+	"controls": true, "webPublishItems": true, "tableParts": true,
+	"legacyDrawing": true, "legacyDrawingHF": true,
+	// extLst is last in the schema. It also appears inside cells, which the
+	// depth tracking in cfInsertionPoint filters out.
+	"extLst": true,
+}
+
+// cfInsertionPoint finds where the conditional-format block belongs: the start
+// of the first worksheet-level element that must follow it, or the closing
+// </worksheet> when there is none.
 //
-// A clean export starts with no differential formats, so the template's dxfs
-// can be adopted wholesale and the original dxfIds stay valid. When the target
-// already has dxfs they are kept and the source ones are appended.
-func CopyDxfsInto(targetStyles, sourceStyles []byte) ([]byte, int, bool, error) {
-	srcBlock, srcCount, ok := extractDxfs(sourceStyles)
-	if !ok || srcCount == 0 {
-		return targetStyles, 0, false, nil
-	}
-	existing, existingCount, hasExisting := extractDxfs(targetStyles)
-	if !hasExisting {
-		// No dxfs element at all: insert one after cellXfs, which the schema
-		// requires to precede it.
-		idx := strings.Index(string(targetStyles), "</cellXfs>")
-		if idx < 0 {
-			return nil, 0, false, fmt.Errorf("目标样式表缺少 </cellXfs>，无法写入条件格式")
+// The scan tracks nesting depth on purpose. A plain string search for a tag
+// name also matches occurrences buried inside sheetData — a cell may carry its
+// own <extLst>, and several of these names can appear inside a rule — and
+// inserting there would put conditionalFormatting inside a row.
+func cfInsertionPoint(doc string) int {
+	depth := 0
+	for i := 0; i < len(doc); {
+		lt := strings.IndexByte(doc[i:], '<')
+		if lt < 0 {
+			return -1
 		}
-		at := idx + len("</cellXfs>")
-		doc := string(targetStyles)
-		return []byte(doc[:at] + srcBlock + doc[at:]), 0, true, nil
-	}
-	if existingCount == 0 {
-		// An empty <dxfs count="0"/> placeholder can be filled in place.
-		newBlock := fmt.Sprintf(`<dxfs count="%d">%s</dxfs>`, srcCount, innerOf(srcBlock))
-		return []byte(strings.Replace(string(targetStyles), existing, newBlock, 1)), 0, true, nil
-	}
-	// Append: rewrite both count and body.
-	merged := fmt.Sprintf(`<dxfs count="%d">%s%s</dxfs>`,
-		existingCount+srcCount, innerOf(existing), innerOf(srcBlock))
-	return []byte(strings.Replace(string(targetStyles), existing, merged, 1)), existingCount, true, nil
-}
-
-func extractDxfs(styles []byte) (block string, count int, ok bool) {
-	doc := string(styles)
-	i := strings.Index(doc, dxfsOpen)
-	if i < 0 {
-		return "", 0, false
-	}
-	// Distinguish <dxfs ...> from <dxfs count="0"/>
-	if j := strings.Index(doc[i:], ">"); j >= 0 {
-		if seg := doc[i : i+j]; strings.Contains(seg, `count="0"`) {
-			return doc[i : i+j+1], 0, true
+		start := i + lt
+		switch {
+		case strings.HasPrefix(doc[start:], "<?"), strings.HasPrefix(doc[start:], "<!"):
+			// XML declaration or comment: no depth change.
+			end := strings.IndexByte(doc[start:], '>')
+			if end < 0 {
+				return -1
+			}
+			i = start + end + 1
+		case strings.HasPrefix(doc[start:], "</"):
+			end := strings.IndexByte(doc[start:], '>')
+			if end < 0 {
+				return -1
+			}
+			depth--
+			if depth <= 0 {
+				return start // </worksheet>
+			}
+			i = start + end + 1
+		default:
+			name, _, bodyStart, selfClosing, err := openTagEnd(doc, start)
+			if err != nil {
+				return -1
+			}
+			if depth == 1 && cfSuccessors[localName(name)] {
+				return start
+			}
+			if !selfClosing {
+				depth++
+			}
+			i = bodyStart
 		}
 	}
-	closeIdx := strings.Index(doc[i:], dxfsClose)
-	if closeIdx < 0 {
-		return "", 0, false
-	}
-	block = doc[i : i+closeIdx+len(dxfsClose)]
-	fmt.Sscanf(attrOrEmpty(block, "count"), "%d", &count)
-	return block, count, true
+	return -1
 }
 
-func attrOrEmpty(block, name string) string {
-	headEnd := strings.Index(block, ">")
-	if headEnd < 0 {
-		return "0"
+// localName drops any namespace prefix: "x:drawing" is the element "drawing".
+func localName(tag string) string {
+	if i := strings.LastIndexByte(tag, ':'); i >= 0 {
+		return tag[i+1:]
 	}
-	v, err := attrValue(block[1:headEnd], name)
-	if err != nil {
-		return "0"
-	}
-	return v
-}
-
-func innerOf(block string) string {
-	start := strings.Index(block, ">")
-	end := strings.LastIndex(block, "</dxfs>")
-	if start < 0 || end < 0 || end < start {
-		return ""
-	}
-	return block[start+1 : end]
+	return tag
 }
 
 // ZipPartForTest exposes a single zip entry so the end-to-end audit can inspect

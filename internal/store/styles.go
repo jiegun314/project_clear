@@ -42,6 +42,32 @@ func (s *Store) CFPattern(id int64) (string, error) {
 	return "", err
 }
 
+// DxfStyle is one stored differential format: the id rules refer to, and the
+// <dxf> block itself.
+type DxfStyle struct {
+	ID  int
+	XML string
+}
+
+// LoadDxfStyles returns every stored differential format, in id order.
+func (s *Store) LoadDxfStyles() ([]DxfStyle, error) {
+	rows, err := s.db.Query(`SELECT id, payload FROM dxf_style ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DxfStyle{}
+	for rows.Next() {
+		var id int
+		var payload string
+		if err := rows.Scan(&id, &payload); err != nil {
+			return nil, err
+		}
+		out = append(out, DxfStyle{ID: id, XML: payload})
+	}
+	return out, rows.Err()
+}
+
 // LoadCFPatterns returns every interned conditional-format program. They are
 // read in one go because FetchExportRows needs them while a cursor is open,
 // and the connection pool deliberately holds a single writer.

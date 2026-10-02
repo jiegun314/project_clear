@@ -4,9 +4,9 @@ import type { ColumnsType } from 'antd/es/table';
 import { Search, FileDown, RefreshCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
+import { INDEX_BLOCK_WIDTH, INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
+import { buildWeekColumns } from './weekColumns';
 import type { GridHeader, GridRow } from '../types';
-
-const INDEX_WIDTHS = [110, 130, 150, 150, 170, 90, 100, 180, 150, 130, 130, 90, 80, 90, 90];
 
 export interface HistoryViewProps {
   weekCode: string | null;
@@ -93,31 +93,20 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
       ellipsis: true,
       render: (v: string) => <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{v === '' ? '—' : v}</span>,
     }));
-    const weekCols: ColumnsType<GridRow> = (header?.weeks ?? []).map((w, i) => ({
-      title: (
-        <div style={{ lineHeight: 1.15, textAlign: 'center' }}>
-          <div style={{ fontWeight: 600, color: JNJ.ink }}>{w.code}</div>
-          <div style={{ fontSize: 11, color: JNJ.textMuted, fontWeight: 400 }}>{w.start}</div>
-        </div>
-      ),
-      dataIndex: ['weeks', i],
-      key: `w${w.code}`,
-      width: 92,
-      align: 'right',
-      render: (v: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v === '' ? '—' : v}</span>,
-    }));
+    const weekCols = buildWeekColumns(header?.weeks ?? [], 'twoRow');
     return [...base, ...weekCols].map((c) => ({
       ...c,
       sorter: true,
       sortOrder: sort.field === String(c.key) ? (sort.desc ? ('descend' as const) : ('ascend' as const)) : null,
     })) as ColumnsType<GridRow>;
   }, [header, sort]);
+  const tableWidth = gridTableWidth(columns.length, header?.weeks?.length ?? 0);
 
-  const doExport = async (clean: boolean) => {
+  const doExport = async (mode: 'clean' | 'template') => {
     if (!weekCode) return;
     setExporting(true);
     try {
-      const res = await api.export(weekCode, clean);
+      const res = await api.export(weekCode, mode);
       if (res) onExported(`已导出 ${res.rows} 行 × ${res.cols} 列 → ${res.destPath}`);
     } finally {
       setExporting(false);
@@ -164,11 +153,11 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
             </Tooltip>
           </Space>
           <Space key="r">
-            <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport(false)}>
-              导出 .xlsm
+            <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport('clean')}>
+              导出纯数据 (.xlsx)
             </Button>
-            <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport(true)}>
-              导出 .xlsx
+            <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport('template')}>
+              导出原文件格式 (.xlsm)
             </Button>
             <Button type="primary" onClick={onClose} style={{ background: JNJ.red, borderColor: JNJ.red }}>
               关闭
@@ -191,11 +180,12 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
         size="small"
         bordered
         sticky
+        tableLayout="fixed"
         rowKey="seq"
         loading={loading}
         columns={columns}
         dataSource={rows}
-        scroll={{ x: 'max-content', y: 'calc(100vh - 340px)' }}
+        scroll={{ x: tableWidth, y: 'calc(100vh - 340px)' }}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该周暂无数据" /> }}
         pagination={{
           current: page,

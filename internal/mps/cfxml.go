@@ -24,8 +24,9 @@ import (
 //
 // So conditional formats are read straight out of the sheet XML, stored with
 // row numbers expressed as offsets from the anchor row, and re-emitted after
-// excelize has written the file. The dxf records the rules point at survive in
-// the template's styles.xml untouched, so dxfIds stay valid.
+// excelize has written the file. The dxf records the rules point at are
+// re-interned on the way through (see dxf.go): each source workbook numbers its
+// own, so an id only means something inside the file it came from.
 const (
 	cfOpenTag  = "<conditionalFormatting"
 	cfCloseTag = "</conditionalFormatting>"
@@ -34,6 +35,10 @@ const (
 
 // offsetToken encodes "the anchor row plus d" inside a stored formula.
 const offsetToken = "#o"
+
+// absRowToken encodes "source row r" for a row-absolute reference, which moves
+// up with the export exactly like the anchor row does.
+const absRowToken = "#a"
 
 // CFRule is one <cfRule> with its formulas stored relative to the anchor row.
 type CFRule struct {
@@ -66,6 +71,65 @@ type CFRow struct {
 // Empty reports whether the row carries no conditional formatting.
 func (c CFRow) Empty() bool { return len(c.Blocks) == 0 }
 
+// DxfID is the differential format this rule paints with, when it names one.
+// Rules that carry their own formatting (colorScale, dataBar, iconSet) do not.
+func (r CFRule) DxfID() (int, bool) {
+	raw, err := attrValue(r.Attrs, "dxfId")
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// SetDxfID points the rule at another differential format. A negative id drops
+// the reference, which is what a rule whose format is missing from the source
+// has to do to stay loadable.
+func (r *CFRule) SetDxfID(id int) {
+	fields := splitAttrs(r.Attrs)
+	kept := make([]string, 0, len(fields)+1)
+	for _, field := range fields {
+		if key, _, ok := strings.Cut(field, "="); ok && strings.TrimSpace(key) == "dxfId" {
+			continue
+		}
+		kept = append(kept, field)
+	}
+	if id >= 0 {
+		kept = append(kept, fmt.Sprintf(`dxfId="%d"`, id))
+	}
+	if len(kept) == 0 {
+		r.Attrs = ""
+		return
+	}
+	r.Attrs = " " + strings.Join(kept, " ")
+}
+
+// RemapDxfIDs repoints every rule's differential format at its home in the
+// exported workbook. index reports where a stored id ended up; an unknown id
+// drops the reference rather than leaving a dangling one behind.
+func RemapDxfIDs(rows map[int]CFRow, index func(id int) (int, bool)) {
+	for row, prog := range rows {
+		for bi := range prog.Blocks {
+			for ri := range prog.Blocks[bi].Rules {
+				rule := &prog.Blocks[bi].Rules[ri]
+				id, ok := rule.DxfID()
+				if !ok {
+					continue
+				}
+				at, found := index(id)
+				if !found {
+					at = -1
+				}
+				rule.SetDxfID(at)
+			}
+		}
+		rows[row] = prog
+	}
+}
+
 type rawCFBlock struct {
 	sqref string
 	inner string
@@ -77,6 +141,13 @@ type rawCFBlock struct {
 // Rules are re-based onto their anchor row: the row a formula refers to becomes
 // an offset, so the same program can be re-applied to any destination row.
 func ParseCFRows(sheetXML []byte) (map[int]CFRow, error) {
+	return ParseCFRowsFrom(sheetXML, FirstDataRow)
+}
+
+// ParseCFRowsFrom is ParseCFRows with an explicit first row, for callers looking
+// at a sheet whose data does not start where a source workbook's does — an
+// export, for instance, which drops the decorative rows above the header.
+func ParseCFRowsFrom(sheetXML []byte, fromRow int) (map[int]CFRow, error) {
 	raw := extractElements(string(sheetXML), cfOpenTag, cfCloseTag)
 	out := make(map[int]CFRow, len(raw))
 	for _, blk := range raw {
@@ -96,7 +167,7 @@ func ParseCFRows(sheetXML []byte) (map[int]CFRow, error) {
 				return nil, fmt.Errorf("无法解析条件格式范围 %q: %w", part, err)
 			}
 			for r := r1; r <= r2; r++ {
-				if r < FirstDataRow {
+				if r < fromRow {
 					continue // the header block keeps the original formatting
 				}
 				rules, err := rebaseRules(rawRules, r)
@@ -228,7 +299,10 @@ func rebaseRefs(formula string, anchorRow int) (string, []int, error) {
 			continue
 		}
 		if ref.rowAbsolute {
-			sb.WriteString(string(runes[i:next]))
+			// An absolute row must travel with the sheet, not stay put: the
+			// export drops the rows above the header, so $DN$56 has to become
+			// $DN$2. Store the row as a token and resolve it at render time.
+			sb.WriteString(ref.colAbs + ref.col + "$" + absRowToken + strconv.Itoa(ref.row))
 		} else {
 			d := ref.row - anchorRow
 			deltas = append(deltas, d)
@@ -242,10 +316,18 @@ func rebaseRefs(formula string, anchorRow int) (string, []int, error) {
 // applyOffsets is the inverse of rebaseRefs: it materialises a stored formula
 // for a concrete destination row.
 func applyOffsets(stored string, newRow int) string {
+	return resolveRowRefs(stored, newRow)
+}
+
+// resolveRowRefs turns the stored row tokens back into real row numbers:
+// "#o<delta>" is the anchor row plus a delta, "#a<row>" is a source row that
+// shifts up with the export.
+func resolveRowRefs(stored string, newRow int) string {
 	var sb strings.Builder
 	runes := []rune(stored)
 	for i := 0; i < len(runes); {
-		if runes[i] == '#' && i+1 < len(runes) && runes[i+1] == 'o' {
+		if runes[i] == '#' && i+1 < len(runes) && (runes[i+1] == 'o' || runes[i+1] == 'a') {
+			kind := runes[i+1]
 			j := i + 2
 			neg := false
 			if j < len(runes) && (runes[j] == '-' || runes[j] == '+') {
@@ -262,11 +344,38 @@ func applyOffsets(stored string, newRow int) string {
 					if neg {
 						n = -n
 					}
-					sb.WriteString(strconv.Itoa(newRow + n))
+					if kind == 'a' {
+						sb.WriteString(strconv.Itoa(n - DropRows))
+					} else {
+						sb.WriteString(strconv.Itoa(newRow + n))
+					}
 					i = j
 					continue
 				}
 			}
+		}
+		sb.WriteRune(runes[i])
+		i++
+	}
+	return sb.String()
+}
+
+// shiftLiteralRows moves absolute row references that are still written out in
+// full. Stored programs written before the export started dropping the rows
+// above the header hold "$DN$56" rather than a token; without this they would
+// point into the data block once the sheet is re-based.
+func shiftLiteralRows(formula string) string {
+	if !strings.Contains(formula, "$") {
+		return formula
+	}
+	var sb strings.Builder
+	runes := []rune(formula)
+	for i := 0; i < len(runes); {
+		ref, next, ok := scanRef(runes, i)
+		if ok && ref.rowAbsolute && ref.row >= HeaderRow {
+			sb.WriteString(ref.colAbs + ref.col + "$" + strconv.Itoa(ref.row-DropRows))
+			i = next
+			continue
 		}
 		sb.WriteRune(runes[i])
 		i++
@@ -395,7 +504,7 @@ func renderRuleBody(rule CFRule, row int) string {
 		sb.WriteString(body[:start])
 		if idx < len(rule.Formulas) {
 			sb.WriteString("<formula>")
-			sb.WriteString(escapeXML(applyOffsets(rule.Formulas[idx], row)))
+			sb.WriteString(escapeXML(resolveRowRefs(shiftLiteralRows(rule.Formulas[idx]), row)))
 			sb.WriteString("</formula>")
 			idx++
 		}
@@ -464,6 +573,18 @@ func StripDataAreaCF(sheetXML []byte) []byte {
 		if !touchesData {
 			continue
 		}
+		rest = strings.Replace(rest, blk.raw, "", 1)
+	}
+	return []byte(rest)
+}
+
+// StripAllCF removes every conditional-format block from a worksheet. The
+// export rebuilds the whole set — data rows and header alike — so anything the
+// template still carries would either duplicate it or point at rows that moved
+// when the sheet was re-based.
+func StripAllCF(sheetXML []byte) []byte {
+	rest := string(sheetXML)
+	for _, blk := range extractElements(rest, cfOpenTag, cfCloseTag) {
 		rest = strings.Replace(rest, blk.raw, "", 1)
 	}
 	return []byte(rest)

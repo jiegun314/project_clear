@@ -24,9 +24,26 @@ type ExportInput struct {
 	Rows []ExportRow
 	// StyleByID resolves a persisted style id to its signature.
 	StyleByID func(id int) (json.RawMessage, bool)
+	// DxfStyles holds the batch's differential formats; DxfIndex maps the id a
+	// stored rule carries onto an index into that slice.
+	DxfStyles []string
+	DxfIndex  func(id int) (int, bool)
 	// FirstDataRowInTemplate is where the template's own data starts; the
 	// template's original rows are reused so styles carry over exactly.
 	Clean bool
+}
+
+// dxfIndex resolves a stored differential-format id to an entry in DxfStyles.
+// Without an explicit mapping the ids are positions, which is what the tests
+// and a single-file export produce.
+func (in ExportInput) dxfIndex(id int) (int, bool) {
+	if in.DxfIndex != nil {
+		return in.DxfIndex(id)
+	}
+	if id < 0 || id >= len(in.DxfStyles) {
+		return 0, false
+	}
+	return id, true
 }
 
 // ExportRow is one row to write.
@@ -40,7 +57,7 @@ type ExportRow struct {
 	// CF is the conditional-format program to re-anchor onto this row.
 	CF CFRow
 	// Comments maps a column number to its comment text.
-	Comments map[int]string
+	Comments CommentMap
 	// SourceRow is the worksheet row the row came from, used to decide
 	// whether a rule still refers to a row that survived filtering.
 	SourceRow int
@@ -154,11 +171,28 @@ func exportTemplate(in ExportInput, totalCols int, stats *ExportStats) error {
 	}
 	stats.PreservedVBA = HasPart(in.DestPath, "xl/vbaProject.bin")
 
+	// Rebuild the sheet before excelize opens the copy: the decorative rows go
+	// away and the header takes their place, so the data block starts at
+	// ExportFirstDataRow.
+	if err := RebaseSheetPart(in.DestPath, totalCols); err != nil {
+		return err
+	}
+
 	f, err := excelize.OpenFile(in.DestPath)
 	if err != nil {
 		return fmt.Errorf("打开模板失败: %w", err)
 	}
 	defer f.Close()
+
+	// The original format is kept, but only its MPS page: the other sheets
+	// (Datadump, PSI, Summary, the helper sheets behind them) describe how the
+	// report was produced and are not what gets handed on.
+	if err := dropOtherSheets(f); err != nil {
+		return err
+	}
+	// Rows 1..54 are the report's decoration, not data. The sheet part was
+	// rebased before this file was opened (see rebase.go), so what is left is
+	// the header on rows 1..3 and nothing below it.
 
 	// The template's own data rows are overwritten rather than deleted:
 	// excelize's RemoveRow re-adjusts the whole sheet on every call, which is
@@ -174,7 +208,7 @@ func exportTemplate(in ExportInput, totalCols int, stats *ExportStats) error {
 
 	// Blank whatever the template had below the merged block so no stale rows
 	// survive underneath the new data.
-	newLast := FirstDataRow + len(in.Rows) - 1
+	newLast := ExportFirstDataRow + len(in.Rows) - 1
 	if lastTemplateRow > newLast {
 		for r := newLast + 1; r <= lastTemplateRow; r++ {
 			for c := 1; c <= totalCols; c++ {
@@ -185,8 +219,9 @@ func exportTemplate(in ExportInput, totalCols int, stats *ExportStats) error {
 		}
 		stats.BlankedRows = lastTemplateRow - newLast
 	}
-	// Any comment the template carried in the data area refers to cells that no
-	// longer hold the same thing.
+	// Annotations are re-anchored rather than copied: whatever the template
+	// carried in the data area belonged to its own rows, which the merged data
+	// has just replaced.
 	clearDataComments(f)
 	stats.Comments = addComments(f, in)
 
@@ -195,8 +230,93 @@ func exportTemplate(in ExportInput, totalCols int, stats *ExportStats) error {
 	}
 
 	cfRows := buildCFRows(in)
+	cfRows, err = prepareConditionalFormats(in, in.DestPath, cfRows, headerCFRows(in.TemplatePath))
+	if err != nil {
+		return err
+	}
 	stats.CFRows = len(cfRows)
+	if err := StripThreadedComments(in.DestPath, SheetName, ExportFirstDataRow); err != nil {
+		return err
+	}
 	return InjectConditionalFormats(in.DestPath, SheetName, cfRows, totalCols)
+}
+
+// prepareConditionalFormats gives every rule a home for its differential format
+// in the exported workbook, then returns the rows to inject.
+//
+// A rule's dxfId was assigned by the workbook it came from, so it cannot be
+// copied across as-is: the format tables differ per file, and an id past the
+// end of the exported table makes Excel refuse the sheet. The batch's formats
+// are appended to the target's (sharing an entry when the format is already
+// there) and each rule is repointed at its new index.
+func prepareConditionalFormats(in ExportInput, dest string, cfRows, headerRows map[int]CFRow) (map[int]CFRow, error) {
+	extras := append([]string{}, in.DxfStyles...)
+	// The header rules come straight from the template sheet, so they still
+	// carry the template's own numbering; its table goes in after the batch's
+	// and those ids are shifted past it.
+	templateBase := len(extras)
+	if len(headerRows) > 0 && in.TemplatePath != "" {
+		if styles, err := zipPart(in.TemplatePath, "xl/styles.xml"); err == nil {
+			extras = append(extras, ParseDxfs(styles)...)
+		}
+	}
+
+	if len(extras) > 0 {
+		styles, err := zipPart(dest, "xl/styles.xml")
+		if err != nil {
+			return nil, err
+		}
+		merged, at, err := MergeDxfs(styles, extras)
+		if err != nil {
+			return nil, err
+		}
+		if err := ReplaceParts(dest, map[string][]byte{"xl/styles.xml": merged}); err != nil {
+			return nil, err
+		}
+		RemapDxfIDs(cfRows, func(id int) (int, bool) {
+			k, ok := in.dxfIndex(id)
+			if !ok || k >= len(at) {
+				return 0, false
+			}
+			return at[k], true
+		})
+		RemapDxfIDs(headerRows, func(id int) (int, bool) {
+			k := templateBase + id
+			if id < 0 || k >= len(at) {
+				return 0, false
+			}
+			return at[k], true
+		})
+	}
+
+	// The report title keeps its own rules, unless a data row already claimed
+	// that row number.
+	for row, prog := range headerRows {
+		if _, taken := cfRows[row]; !taken {
+			cfRows[row] = prog
+		}
+	}
+	return cfRows, nil
+}
+
+// dropOtherSheets removes every worksheet except MPS, leaving the rest of the
+// package — styles, conditional formats, macros — as the source file had it.
+func dropOtherSheets(f *excelize.File) error {
+	for _, name := range f.GetSheetList() {
+		if name == SheetName {
+			continue
+		}
+		if err := f.DeleteSheet(name); err != nil {
+			return fmt.Errorf("移除工作表 %q 失败: %w", name, err)
+		}
+	}
+	for i, name := range f.GetSheetList() {
+		if name == SheetName {
+			f.SetActiveSheet(i)
+			return nil
+		}
+	}
+	return fmt.Errorf("模板中缺少 %q 工作表", SheetName)
 }
 
 // exportClean rebuilds a workbook that contains only the MPS sheet.
@@ -209,18 +329,11 @@ func exportClean(in ExportInput, totalCols int, stats *ExportStats) error {
 
 	f := excelize.NewFile()
 	defer f.Close()
-	// NewFile starts with Sheet1; MPS becomes the only sheet.
-	const defaultSheet = "Sheet1"
-	for _, name := range f.GetSheetList() {
-		if name != defaultSheet {
-			continue
-		}
-		if err := f.DeleteSheet(name); err != nil {
-			return err
-		}
-	}
-	if _, err := f.NewSheet(SheetName); err != nil {
-		return err
+	// NewFile starts with exactly one sheet. Rename it rather than deleting it
+	// and adding another: a workbook must keep at least one sheet, so deleting
+	// the last one leaves an empty "Sheet1" behind next to MPS.
+	if err := f.SetSheetName(f.GetSheetList()[0], SheetName); err != nil {
+		return fmt.Errorf("创建工作表失败: %w", err)
 	}
 	f.SetActiveSheet(0)
 
@@ -237,28 +350,14 @@ func exportClean(in ExportInput, totalCols int, stats *ExportStats) error {
 		return fmt.Errorf("保存导出文件失败: %w", err)
 	}
 
-	// The new workbook has no differential formats, so the template's dxfs are
-	// adopted wholesale; the rule dxfIds then stay valid.
-	if styles, err := zipPart(in.DestPath, "xl/styles.xml"); err == nil {
-		if srcStyles, err := zipPart(in.TemplatePath, "xl/styles.xml"); err == nil {
-			if merged, _, ok, err := CopyDxfsInto(styles, srcStyles); err == nil && ok {
-				if err := ReplaceParts(in.DestPath, map[string][]byte{"xl/styles.xml": merged}); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
 	cfRows := buildCFRows(in)
-	stats.CFRows = len(cfRows)
-	// Keep the header-area rules too, so the report title keeps its colours.
-	if header := headerCFRows(in.TemplatePath); len(header) > 0 {
-		for k, v := range header {
-			if _, taken := cfRows[k]; !taken {
-				cfRows[k] = v
-			}
-		}
+	// The title block keeps its own rules, so the report still looks like the
+	// report; the data rows bring theirs from whichever file they came from.
+	cfRows, err = prepareConditionalFormats(in, in.DestPath, cfRows, headerCFRows(in.TemplatePath))
+	if err != nil {
+		return err
 	}
+	stats.CFRows = len(cfRows)
 	return InjectConditionalFormats(in.DestPath, SheetName, cfRows, totalCols)
 }
 
@@ -270,7 +369,7 @@ func writeRows(f *excelize.File, in ExportInput, res *styleResolver, totalCols i
 	var problems int
 
 	for i, row := range in.Rows {
-		newRow := FirstDataRow + i
+		newRow := ExportFirstDataRow + i
 
 		for c := 1; c <= IndexCols; c++ {
 			if v := row.Index[c-1]; v != "" {
@@ -365,7 +464,7 @@ func buildCFRows(in ExportInput) map[int]CFRow {
 		if row.CF.Empty() {
 			continue
 		}
-		newRow := FirstDataRow + i
+		newRow := ExportFirstDataRow + i
 		filtered := dropUnreachableRules(row.CF, srcOf, i)
 		if filtered.Empty() {
 			continue
@@ -416,14 +515,19 @@ func addComments(f *excelize.File, in ExportInput) int {
 		if len(row.Comments) == 0 {
 			continue
 		}
-		newRow := FirstDataRow + i
-		for col, text := range row.Comments {
+		newRow := ExportFirstDataRow + i
+		for col, c := range row.Comments {
+			text := strings.TrimSpace(c.Text)
 			if col < 1 || col > IndexCols+len(in.Weeks) || text == "" {
 				continue
 			}
+			author := c.Author
+			if author == "" {
+				author = "CLEAR"
+			}
 			if err := f.AddComment(SheetName, excelize.Comment{
 				Cell:   CellRef(col, newRow),
-				Author: "CLEAR",
+				Author: author,
 				Text:   text,
 			}); err == nil {
 				n++
@@ -442,7 +546,7 @@ func clearDataComments(f *excelize.File) {
 	}
 	for _, c := range list {
 		_, row, err := cellToCoords(c.Cell)
-		if err != nil || row < FirstDataRow {
+		if err != nil || row < ExportFirstDataRow {
 			continue
 		}
 		_ = f.DeleteComment(SheetName, c.Cell)
@@ -456,7 +560,7 @@ func lastDataRow(f *excelize.File) (int, error) {
 	}
 	last := 0
 	for i, r := range rows {
-		if i+1 < FirstDataRow {
+		if i+1 < ExportFirstDataRow {
 			continue
 		}
 		for _, v := range r {
@@ -469,9 +573,12 @@ func lastDataRow(f *excelize.File) (int, error) {
 	return last, nil
 }
 
-// copyHeaderBlock reproduces rows 1..57 of the template into a clean workbook:
-// the decorative title block, both header rows, the styled blank row, merged
-// cells and column widths.
+// copyHeaderBlock reproduces the template's header into a clean workbook: the
+// index/week header row, the week start dates and the styled separator row,
+// with their merges and column widths.
+//
+// Those live on rows 55..57 of the source and land on rows 1..3 here — the
+// decorative block above them is not part of the data and is left out.
 func copyHeaderBlock(src, dst *excelize.File, totalCols int) error {
 	res := newStyleResolver(dst)
 	raw, err := src.GetRows(SheetName, excelize.Options{RawCellValue: true})
@@ -481,21 +588,25 @@ func copyHeaderBlock(src, dst *excelize.File, totalCols int) error {
 	if len(raw) > BlankRow {
 		raw = raw[:BlankRow]
 	}
-	for i := 0; i < len(raw); i++ {
-		rowNum := i + 1
-		for c := 1; c <= totalCols && c <= len(raw[i]); c++ {
-			if v := raw[i][c-1]; v != "" {
-				if err := dst.SetCellStr(SheetName, CellRef(c, rowNum), v); err != nil {
+
+	// Values: source row r -> exported row r-DropRows.
+	for r := HeaderRow; r <= len(raw) && r <= BlankRow; r++ {
+		outRow := r - DropRows
+		source := raw[r-1]
+		for c := 1; c <= totalCols && c <= len(source); c++ {
+			if v := source[c-1]; v != "" {
+				if err := dst.SetCellStr(SheetName, CellRef(c, outRow), v); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	// Styles for the header block.
-	for rowNum := 1; rowNum <= BlankRow; rowNum++ {
+	for r := HeaderRow; r <= BlankRow; r++ {
+		outRow := r - DropRows
 		var ids []int
 		for c := 1; c <= totalCols; c++ {
-			ref := CellRef(c, rowNum)
+			ref := CellRef(c, r)
 			sid, err := src.GetCellStyle(SheetName, ref)
 			if err != nil {
 				ids = append(ids, 0)
@@ -515,8 +626,8 @@ func copyHeaderBlock(src, dst *excelize.File, totalCols int) error {
 			ids = append(ids, id)
 		}
 		for _, run := range coalesceRuns(ids) {
-			h := CellRef(run.from, rowNum)
-			v := CellRef(run.to, rowNum)
+			h := CellRef(run.from, outRow)
+			v := CellRef(run.to, outRow)
 			if run.styleID != 0 {
 				if err := dst.SetCellStyle(SheetName, h, v, run.styleID); err != nil {
 					return err
@@ -551,19 +662,29 @@ func copyHeaderBlock(src, dst *excelize.File, totalCols int) error {
 			if err != nil {
 				continue
 			}
-			// Only header merges: a merge inside the data block would fight the
-			// merged rows that are about to be written.
-			if r1 < 1 || r2 > BlankRow {
+			// Only the header's own merges: a merge inside the data block would
+			// fight the merged rows that are about to be written, and the
+			// decorative merges above the header have no row to land on.
+			if r1 < HeaderRow || r2 > BlankRow {
 				continue
 			}
-			_ = dst.MergeCell(SheetName, start, end)
+			c1, _, err := cellToCoords(start)
+			if err != nil {
+				continue
+			}
+			c2, _, err := cellToCoords(end)
+			if err != nil {
+				continue
+			}
+			_ = dst.MergeCell(SheetName, CellRef(c1, r1-DropRows), CellRef(c2, r2-DropRows))
 		}
 	}
 	return nil
 }
 
-// headerCFRows returns the conditional formats that belong to the report header
-// so a clean export keeps them.
+// headerCFRows returns the template's header-area conditional formats, keyed by
+// the row they land on in the export. Rules anchored in the decorative block
+// above the header have no row to land on and are left out.
 func headerCFRows(templatePath string) map[int]CFRow {
 	part, err := SheetPartPath(templatePath, SheetName)
 	if err != nil {
@@ -591,13 +712,19 @@ func headerCFRows(templatePath string) map[int]CFRow {
 				continue
 			}
 			for r := r1; r <= r2; r++ {
+				if r < HeaderRow {
+					continue
+				}
 				rules, err := rebaseRules(rawRules, r)
 				if err != nil {
 					continue
 				}
-				row := out[r]
+				// rebaseRules keeps the formulas relative to the source row;
+				// the block moves up with everything else.
+				exportRow := r - DropRows
+				row := out[exportRow]
 				row.Blocks = append(row.Blocks, CFBlock{C1: c1, C2: c2, Rules: rules})
-				out[r] = row
+				out[exportRow] = row
 			}
 		}
 	}

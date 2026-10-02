@@ -10,8 +10,16 @@ export function ClearLogs() {
   return window['go']['main']['App']['ClearLogs']();
 }
 
+export function ClearStaging() {
+  return window['go']['main']['App']['ClearStaging']();
+}
+
 export function Commit() {
   return window['go']['main']['App']['Commit']();
+}
+
+export function ConfirmAddFiles(arg1) {
+  return window['go']['main']['App']['ConfirmAddFiles'](arg1);
 }
 
 export function Export(arg1, arg2) {
@@ -36,6 +44,10 @@ export function GetGridHeader(arg1) {
 
 export function GetLogs(arg1) {
   return window['go']['main']['App']['GetLogs'](arg1);
+}
+
+export function GetStagingFiles() {
+  return window['go']['main']['App']['GetStagingFiles']();
 }
 
 export function GetStatus() {

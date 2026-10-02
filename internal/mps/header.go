@@ -42,6 +42,25 @@ const (
 	LOCCol = 12
 )
 
+// DropRows is the decorative block above the header — the report title, the
+// logo row and the blank spacer rows. Nothing in rows 1..54 is data, so an
+// export leaves them out entirely and shifts everything up.
+const DropRows = HeaderRow - 1
+
+// Rows in an exported workbook. A source row r lands on exported row
+// r-DropRows, so the header that the source keeps on row 55 is the first row of
+// the exported sheet.
+const (
+	// ExportHeaderRow is the index/week header row.
+	ExportHeaderRow = HeaderRow - DropRows
+	// ExportDateRow holds the week start dates.
+	ExportDateRow = DateRow - DropRows
+	// ExportBlankRow is the styled separator under the header.
+	ExportBlankRow = BlankRow - DropRows
+	// ExportFirstDataRow is where the merged data starts.
+	ExportFirstDataRow = FirstDataRow - DropRows
+)
+
 // Week is a single week column, stored as one unit so the week code and its
 // start date can never drift apart. The source workbook keeps them on two rows
 // (55 and 56); the UI and the exporter expand them back to two rows.

@@ -72,7 +72,7 @@ type DataRow struct {
 	// CF is the conditional-format program captured for this row.
 	CF CFRow `json:"cf"`
 	// Comments maps a column number to its comment text.
-	Comments map[int]string `json:"comments,omitempty"`
+	Comments CommentMap `json:"comments,omitempty"`
 	// SourceRow is the worksheet row the data came from.
 	SourceRow int `json:"sourceRow"`
 	// FileID identifies the source file within the batch.
@@ -99,6 +99,9 @@ type ReadOptions struct {
 	ReadColumns int
 	// Dict interns cell styles; share one across a batch.
 	Dict *StyleDict
+	// Dxf interns conditional-format records; share one across a batch so ids
+	// from different workbooks cannot collide.
+	Dxf *DxfDict
 }
 
 // ReadFile extracts the header, the filtered rows and everything needed to
@@ -141,10 +144,17 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 		// reject the data.
 		cfByRow = map[int]CFRow{}
 	}
+	// Each workbook numbers its own <dxf> records, so resolve them against this
+	// file and re-intern them for the batch.
+	if opt.Dxf != nil {
+		if styles, err := zipPart(path, "xl/styles.xml"); err == nil {
+			remapSourceDxfs(cfByRow, ParseDxfs(styles), opt.Dxf)
+		}
+	}
 
-	commentsByRow, err := readComments(f)
+	commentsByRow, err := readComments(path, SheetName)
 	if err != nil {
-		commentsByRow = map[int]map[int]string{}
+		commentsByRow = map[int]CommentMap{}
 	}
 
 	// Values come from a streaming pass over the sheet XML: excelize's
@@ -192,7 +202,11 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 			row.Index[c] = cells[c]
 		}
 		for w := range header.Weeks {
-			col := FirstWeekCol + w - 1
+			// Week w lives in column P+w (1-based), so its 0-based cell index
+			// is FirstWeekCol+w-1. Reading from one column earlier put the
+			// element type of column O into the first week cell and shifted
+			// every number one column to the left.
+			col := FirstWeekCol + w
 			if col-1 < len(cells) {
 				row.Weeks[w] = cells[col-1]
 			}
@@ -303,26 +317,4 @@ func readSheetCFRows(path string) (map[int]CFRow, error) {
 		return nil, err
 	}
 	return ParseCFRows(raw)
-}
-
-func readComments(f *excelize.File) (map[int]map[int]string, error) {
-	list, err := f.GetComments(SheetName)
-	if err != nil {
-		return nil, err
-	}
-	out := map[int]map[int]string{}
-	for _, c := range list {
-		col, row, err := cellToCoords(c.Cell)
-		if err != nil {
-			continue
-		}
-		if row < FirstDataRow {
-			continue
-		}
-		if out[row] == nil {
-			out[row] = map[int]string{}
-		}
-		out[row][col] = c.Text
-	}
-	return out, nil
 }

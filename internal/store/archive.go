@@ -66,7 +66,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		// typing still keeps a stray text value intact rather than coercing it.
 		fmt.Fprintf(&b, `, %s REAL`, quoteIdent(WeekColumnName(wc)))
 	}
-	b.WriteString(`, cf_id INTEGER, file_name TEXT, src_row INTEGER, style_ids TEXT)`)
+	b.WriteString(`, cf_id INTEGER, file_name TEXT, src_row INTEGER, style_ids TEXT, comments TEXT)`)
 	if _, err := tx.Exec(b.String()); err != nil {
 		return nil, err
 	}
@@ -83,8 +83,8 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		cols = append(cols, WeekColumnName(wc))
 		placeholders = append(placeholders, "?")
 	}
-	cols = append(cols, "cf_id", "file_name", "src_row", "style_ids")
-	placeholders = append(placeholders, "?", "?", "?", "?")
+	cols = append(cols, "cf_id", "file_name", "src_row", "style_ids", "comments")
+	placeholders = append(placeholders, "?", "?", "?", "?", "?")
 
 	stmt, err := tx.Prepare(fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`,
 		quoteIdent(table), strings.Join(cols, ","), strings.Join(placeholders, ",")))
@@ -95,7 +95,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 
 	sel2, err := tx.Query(
 		`SELECT seq, c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
-		        weeks, style_ids, cf_id, file_name, src_row
+		        weeks, style_ids, cf_id, file_name, src_row, comments
 		 FROM stg_row WHERE batch_id=? ORDER BY seq`, sum.BatchID)
 	if err != nil {
 		return nil, err
@@ -106,6 +106,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 	for sel2.Next() {
 		var seq int
 		var weeksJSON, styleJSON string
+		var commentsJSON sql.NullString
 		var cfID sql.NullInt64
 		var fileName string
 		var srcRow int
@@ -116,7 +117,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		for i := range idxCells {
 			scan = append(scan, &idxCells[i])
 		}
-		scan = append(scan, &weeksJSON, &styleJSON, &cfID, &fileName, &srcRow)
+		scan = append(scan, &weeksJSON, &styleJSON, &cfID, &fileName, &srcRow, &commentsJSON)
 		if err := sel2.Scan(scan...); err != nil {
 			return nil, err
 		}
@@ -138,7 +139,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 			}
 			args = append(args, weekValue(raw))
 		}
-		args = append(args, nullInt(cfID), fileName, srcRow, styleJSON)
+		args = append(args, nullInt(cfID), fileName, srcRow, styleJSON, nullString(commentsJSON))
 		if _, err := stmt.Exec(args...); err != nil {
 			return nil, err
 		}
@@ -215,6 +216,15 @@ func nullInt(v sql.NullInt64) any {
 		return nil
 	}
 	return v.Int64
+}
+
+// nullString keeps a nullable text column NULL rather than turning an absent
+// value into an empty string that later reads as "no annotations on this row".
+func nullString(v sql.NullString) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.String
 }
 
 // ListArchive returns committed weeks, newest first.

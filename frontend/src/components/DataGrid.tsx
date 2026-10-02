@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Table, Input, Select, Space, Tag, Tooltip, Empty, Segmented } from 'antd';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Table, Input, Pagination, Space, Tag, Tooltip, Empty } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import { Search, RotateCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
-import type { GridHeader, GridRow, Week } from '../types';
+import { INDEX_BLOCK_WIDTH, INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
+import { buildWeekColumns } from './weekColumns';
+import type { GridHeader, GridRow } from '../types';
 
 export interface DataGridProps {
   /** "" shows the staging area; a week code shows that committed week. */
@@ -13,17 +15,6 @@ export interface DataGridProps {
   pageSize: number;
   /** Bumped by the parent after an import or commit to force a reload. */
   reloadToken: number;
-}
-
-const INDEX_WIDTHS = [110, 130, 150, 150, 170, 90, 100, 180, 150, 130, 130, 90, 80, 90, 90];
-
-function numberCell(v: string) {
-  if (v === '' || v === null || v === undefined) return '';
-  const n = Number(v);
-  if (Number.isNaN(n)) return v;
-  // Keep the workbook's own precision, but trim the noise a planner never
-  // wants to read (2499.9999999999995 -> 2500 is NOT done; only .0 is).
-  return Number.isInteger(n) ? String(n) : v;
 }
 
 export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataGridProps) {
@@ -35,7 +26,31 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
   const [debounced, setDebounced] = useState('');
   const [sort, setSort] = useState<{ field: string; desc: boolean }>({ field: 'seq', desc: false });
   const [loading, setLoading] = useState(false);
+  // The page size starts from the configured default but the footer's size
+  // selector owns it from then on.
+  const [size, setSize] = useState(pageSize);
+  useEffect(() => setSize(pageSize), [pageSize]);
   const reqId = useRef(0);
+  // The table body follows the space the splitter gives it. antd wants a
+  // number, so the wrapper and its separate sticky header are measured.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [bodyHeight, setBodyHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const header = el.querySelector('.ant-table-header') as HTMLElement | null;
+      const headerHeight = header ? header.offsetHeight : 48;
+      setBodyHeight(Math.max(160, el.clientHeight - headerHeight));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    const header = el.querySelector('.ant-table-header');
+    if (header) observer.observe(header);
+    return () => observer.disconnect();
+  }, [header]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
@@ -69,7 +84,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
       const res = await api.queryData({
         source,
         page,
-        pageSize,
+        pageSize: size,
         search: debounced,
         sortField: sort.field,
         sortDesc: sort.desc,
@@ -87,7 +102,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [header, source, page, pageSize, debounced, sort]);
+  }, [header, source, page, size, debounced, sort]);
 
   useEffect(() => {
     void load();
@@ -119,32 +134,16 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
 
   const weekCols = useMemo<ColumnsType<GridRow>>(() => {
     // Go marshals a nil slice as null, so the array is never assumed here.
-    const weeks: Week[] = header?.weeks ?? [];
-    return weeks.map((w, i) => ({
-      title: (
-        <div style={{ lineHeight: 1.15, textAlign: 'center' }}>
-          <div style={{ fontWeight: 600, color: JNJ.ink }}>{w.code}</div>
-          {headerDisplay === 'twoRow' && (
-            <div style={{ fontSize: 11, color: JNJ.textMuted, fontWeight: 400 }}>{w.start}</div>
-          )}
-        </div>
-      ),
-      dataIndex: ['weeks', i],
-      key: `w${w.code}`,
-      width: 96,
-      align: 'right',
-      render: (v: string) => {
-        const text = numberCell(v ?? '');
-        if (text === '') return <span style={{ color: JNJ.textMuted }}>—</span>;
-        const n = Number(v);
-        const color =
-          text === '' ? undefined : n < 0 ? JNJ.danger : n === 0 ? JNJ.textMuted : JNJ.ink;
-        return <span style={{ color, fontVariantNumeric: 'tabular-nums' }}>{text}</span>;
-      },
-    }));
+    return buildWeekColumns(header?.weeks ?? [], headerDisplay);
   }, [header, headerDisplay]);
 
   const allColumns = [...indexCols, ...weekCols];
+  // An explicit pixel width keeps the header table and the body table on the
+  // same grid; `max-content` let each of them solve the layout on its own.
+  // Before anything is imported there are no columns at all, and forcing the
+  // pixel width would paint a meaningless horizontal scrollbar under the empty
+  // placeholder.
+  const tableWidth = gridTableWidth(allColumns.length, header?.weeks?.length ?? 0);
 
   // Sorting is a backend concern: the columns only declare that they are
   // sortable and report the intent, and the order flag is echoed back so the
@@ -231,16 +230,20 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
         </Space>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: JNJ.surface }}>
+      {/* One scrollbar only: the table body scrolls inside this box, while the
+          pagination sits below it and never scrolls out of view. */}
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: JNJ.surface }}>
         <Table<GridRow>
           size="small"
           bordered
           sticky
+          tableLayout="fixed"
           rowKey="seq"
           loading={loading}
           columns={columns}
           dataSource={rows}
-          scroll={{ x: 'max-content', y: 'calc(100vh - 520px)' }}
+          pagination={false}
+          scroll={{ x: tableWidth, y: bodyHeight > 0 ? bodyHeight : 'calc(100vh - 520px)' }}
           locale={{
             emptyText: (
               <Empty
@@ -251,17 +254,32 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
               />
             ),
           }}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            pageSizeOptions: [50, 100, 200, 500, 1000],
-            showTotal: (t, r) => `第 ${r[0]}-${r[1]} 条 / 共 ${t.toLocaleString()} 条`,
-          }}
-          onChange={(pagination, filters, sorter, extra) => {
-            onTableChange(pagination, filters, sorter, extra);
-            setPage(pagination.current ?? 1);
+          onChange={(pagination, filters, sorter, extra) => onTableChange(pagination, filters, sorter, extra)}
+        />
+      </div>
+
+      <div
+        style={{
+          flex: '0 0 auto',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          padding: '6px 10px',
+          background: JNJ.surface,
+          borderTop: `1px solid ${JNJ.border}`,
+        }}
+      >
+        <Pagination
+          size="small"
+          current={page}
+          pageSize={size}
+          total={total}
+          showSizeChanger
+          pageSizeOptions={[50, 100, 200, 500, 1000]}
+          showTotal={(t, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${t.toLocaleString()} 条`}
+          onChange={(nextPage, nextSize) => {
+            if (nextSize !== size) setSize(nextSize);
+            setPage(nextSize !== size ? 1 : nextPage);
           }}
         />
       </div>

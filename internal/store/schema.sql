@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS cf_pattern (
   payload  TEXT NOT NULL
 );
 
+-- Interned differential formats (<dxf> blocks) that conditional-format rules
+-- paint with. Each source workbook numbers its own, so ids are reassigned for
+-- the batch and mapped back to the export's table on the way out.
+CREATE TABLE IF NOT EXISTS dxf_style (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  sig_hash TEXT NOT NULL UNIQUE,
+  payload  TEXT NOT NULL
+);
+
 -- One row per import/add action.
 CREATE TABLE IF NOT EXISTS batch (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -9,6 +9,7 @@ import type {
   AppConfig,
   AppInfo,
   ArchiveEntry,
+  ClearResult,
   CommitResult,
   ConfigView,
   ExportResult,
@@ -17,6 +18,7 @@ import type {
   GridResult,
   ImportResult,
   LogEntry,
+  StagingFilesView,
   Status,
 } from '../types';
 
@@ -25,8 +27,11 @@ interface AppBindings {
   GetStatus(): Promise<Status>;
   ImportFolder(): Promise<ImportResult | null>;
   AddFiles(): Promise<ImportResult | null>;
+  /** Retry 添加 after the user accepted overwriting the listed files. */
+  ConfirmAddFiles(paths: string[]): Promise<ImportResult | null>;
   Commit(): Promise<CommitResult>;
-  Export(weekCode: string, clean: boolean): Promise<ExportResult | null>;
+  ClearStaging(): Promise<ClearResult>;
+  Export(weekCode: string, mode: string): Promise<ExportResult | null>;
   RevealExport(path: string): Promise<void>;
   QueryData(q: GridQuery): Promise<GridResult>;
   GetGridHeader(source: string): Promise<GridHeader>;
@@ -37,6 +42,7 @@ interface AppBindings {
   SaveConfig(c: AppConfig): Promise<string[]>;
   ResetConfig(): Promise<ConfigView>;
   GetLogs(limit: number): Promise<LogEntry[]>;
+  GetStagingFiles(): Promise<StagingFilesView>;
   ClearLogs(): Promise<void>;
   Quit(): Promise<void>;
 }
@@ -73,8 +79,13 @@ export const api = {
   getStatus: () => app().GetStatus(),
   importFolder: () => app().ImportFolder(),
   addFiles: () => app().AddFiles(),
+  /** Called from the overwrite prompt shown by 添加. */
+  confirmAddFiles: (paths: string[]) => app().ConfirmAddFiles(paths),
   commit: () => app().Commit(),
-  export: (weekCode: string, clean: boolean) => app().Export(weekCode, clean),
+  /** Drops every imported-but-unsaved row; integrated weeks are untouched. */
+  clearStaging: () => app().ClearStaging(),
+  /** mode is "", "clean" or "template"; "" follows the configured default. */
+  export: (weekCode: string, mode: string) => app().Export(weekCode, mode),
   revealExport: (path: string) => app().RevealExport(path),
   queryData: (q: GridQuery) => app().QueryData(q),
   getGridHeader: (source: string) => app().GetGridHeader(source),
@@ -85,6 +96,7 @@ export const api = {
   saveConfig: (c: AppConfig) => app().SaveConfig(c),
   resetConfig: () => app().ResetConfig(),
   getLogs: (limit: number) => app().GetLogs(limit),
+  getStagingFiles: () => app().GetStagingFiles(),
   clearLogs: () => app().ClearLogs(),
   quit: () => app().Quit(),
 };

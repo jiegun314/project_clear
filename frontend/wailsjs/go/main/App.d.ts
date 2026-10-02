@@ -10,9 +10,13 @@ export function AddFiles():Promise<service.ImportResult>;
 
 export function ClearLogs():Promise<void>;
 
+export function ClearStaging():Promise<main.ClearStagingResult>;
+
 export function Commit():Promise<main.CommitResult>;
 
-export function Export(arg1:string,arg2:boolean):Promise<main.ExportResult>;
+export function ConfirmAddFiles(arg1:Array<string>):Promise<service.ImportResult>;
+
+export function Export(arg1:string,arg2:string):Promise<main.ExportResult>;
 
 export function GetAppInfo():Promise<main.AppInfo>;
 
@@ -23,6 +27,8 @@ export function GetConfig():Promise<main.ConfigView>;
 export function GetGridHeader(arg1:string):Promise<main.GridHeader>;
 
 export function GetLogs(arg1:number):Promise<Array<logging.Entry>>;
+
+export function GetStagingFiles():Promise<main.StagingFilesView>;
 
 export function GetStatus():Promise<main.Status>;
 
