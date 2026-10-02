@@ -253,6 +253,7 @@ export namespace main {
 	    fileCount: number;
 	    rowCount: number;
 	    failedCount: number;
+	    batchState: string;
 	    files: store.StagedFileDetail[];
 	
 	    static createFrom(source: any = {}) {
@@ -265,6 +266,7 @@ export namespace main {
 	        this.fileCount = source["fileCount"];
 	        this.rowCount = source["rowCount"];
 	        this.failedCount = source["failedCount"];
+	        this.batchState = source["batchState"];
 	        this.files = this.convertValues(source["files"], store.StagedFileDetail);
 	    }
 	
