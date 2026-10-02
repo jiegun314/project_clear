@@ -18,6 +18,8 @@ void clearOpenPanel(const char *title, const char *dir, int allowFiles, int allo
                     int multiple, const char *filters, const char *buttonLabel);
 void clearSavePanel(const char *title, const char *filename, const char *dir,
                     const char *filters, const char *buttonLabel);
+void clearTestSendResult(int canceled, int pathCount);
+void clearTestSendTrickyPaths(void);
 */
 import "C"
 
@@ -41,6 +43,11 @@ var (
 	panelCh chan panelResult
 )
 
+// clearPanelResult receives a malloc'd UTF-8 buffer owned by the caller (the
+// ObjC side strdups it) and takes over freeing it. It must never be handed a
+// pointer straight out of [NSString UTF8String]: free() on that kills the
+// process with SIGTRAP.
+//
 //export clearPanelResult
 func clearPanelResult(cjson *C.char) {
 	defer C.free(unsafe.Pointer(cjson))
@@ -134,4 +141,16 @@ func boolToCInt(b bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+// testSendResult drives the ObjC sendResult path without showing a panel.
+// It lives here rather than in the test file because cgo is not available in
+// _test.go sources.
+func testSendResult(canceled bool, pathCount int) {
+	C.clearTestSendResult(boolToCInt(canceled), C.int(pathCount))
+}
+
+// testSendTrickyPaths sends paths that need JSON escaping.
+func testSendTrickyPaths() {
+	C.clearTestSendTrickyPaths()
 }
