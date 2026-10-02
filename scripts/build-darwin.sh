@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# 打包 macOS 应用。
+# 打包 macOS 应用（仅 Apple Silicon / arm64）。
+#
+# 只发 arm64：通用二进制会把 Go 二进制复制一份，压缩包几乎翻倍
+# （实测 18.8 MB → 9.1 MB），项目也不再声明支持 Intel Mac。
+# 需要临时构建 Intel 版时用 `wails build -platform darwin/amd64`。
 #
 # wails build 之后额外做三件事：
 #   1. 校验 Info.plist 合法。Wails 直接把 wails.json 里的文本塞进 plist 模板，
@@ -19,8 +23,8 @@ RESOURCES="$APP/Contents/Resources"
 PLIST="$APP/Contents/Info.plist"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
-echo "==> 构建"
-wails build -clean
+echo "==> 构建 (darwin/arm64)"
+wails build -platform darwin/arm64 -clean
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "非 macOS，跳过图标与 plist 检查"
@@ -60,7 +64,7 @@ touch "$APP"
 
 echo "==> 打包"
 VERSION=$(python3 -c "import json;print(json.load(open('wails.json'))['info']['productVersion'])")
-ARCH=$(uname -m)
+ARCH=arm64
 ARCHIVE="dist/CLEAR-${VERSION}-darwin-${ARCH}.zip"
 mkdir -p dist
 rm -f "$ARCHIVE"

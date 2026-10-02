@@ -48,7 +48,7 @@ CLEAR 把 MPS 系统导出的 Excel 周报表合并成本地数据库，并按�
 
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
-| macOS | 13 及以上 | 主要验收平台。文件选择器由 Objective-C 调用 `NSOpenPanel` 实现 |
+| macOS | 13 及以上，Apple Silicon（arm64） | 主要验收平台。文件选择器由 Objective-C 调用 `NSOpenPanel` 实现；发布包只出 arm64（通用二进制体积近乎翻倍，见 [3.3 打包](#33-打包)） |
 | Windows | 10 / 11（x64） | 已提供打包版本。文件选择器走 Wails 内置的系统对话框，需要 WebView2 运行时（一般已预装） |
 | Go | 1.26+ | 与 `go.mod` 的 `go 1.26.0` 一致 |
 | Node.js | 20.19+ / 22.12+ | Vite 7 的最低要求，附 npm |
@@ -99,13 +99,17 @@ wails dev
 ### 3.3 打包
 
 ```bash
-# 最简打包，产物：build/bin/CLEAR.app
-wails build -clean
+# 最简打包（仅 Apple Silicon），产物：build/bin/CLEAR.app
+wails build -platform darwin/arm64 -clean
 
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.5.1-darwin-<架构>.zip
+# 并打包成 dist/CLEAR-1.5.1-darwin-arm64.zip
 ./scripts/build-darwin.sh
 ```
+
+发布包只出 **darwin/arm64**：通用二进制（arm64 + x86_64）会把 Go 二进制复制一份，
+压缩包从 9.1 MB 涨到 18.8 MB，而本项目不再声明支持 Intel Mac。
+确实需要 Intel 版时，单独构建即可：`wails build -platform darwin/amd64`。
 
 其他常用参数：
 
