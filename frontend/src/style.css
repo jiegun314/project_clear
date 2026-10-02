@@ -1,0 +1,53 @@
+:root {
+  --jnj-red: #d71920;
+  --jnj-ink: #1f1f1f;
+  --jnj-text: #525252;
+  --jnj-border: #e0e0e0;
+  --jnj-bg: #f4f4f5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  color: var(--jnj-ink);
+  background: var(--jnj-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The data grid is the densest thing on screen, so the chrome stays quiet. */
+.ant-table-tbody > tr > td {
+  font-variant-numeric: tabular-nums;
+}
+
+.ant-table-thead > tr > th {
+  white-space: nowrap;
+}
+
+.ant-spin .ant-spin-dot-item {
+  background-color: var(--jnj-red);
+}
+
+@keyframes clear-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: clear-spin 0.9s linear infinite;
+}
+
+/* Drag region for the frameless macOS title bar. */
+.drag-region {
+  -webkit-app-region: drag;
+}

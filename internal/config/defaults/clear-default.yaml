@@ -1,0 +1,20 @@
+# CLEAR 运行参数
+# 本文件由程序自动生成，可手工编辑；删除后重启程序会重新生成默认值。
+
+# 从 P 列开始读取的周数据列数（默认 20，即 P..AI）
+readColumns: 20
+
+# LOC 列（L 列）筛选值，只保留该值的数据行
+locFilter: "WH_CNB"
+
+# 主界面数据表格每页显示行数
+pageSize: 200
+
+# 表头显示方式：twoRow=周码与日期分两行（对应源文件第55/56行）；oneRow=合并为一行
+headerDisplay: twoRow
+
+# 导出方式：template=基于首个源文件模板改写（保真最高，含宏）；clean=干净重建
+exportMode: template
+
+# 上次导出目录
+exportDir: ""

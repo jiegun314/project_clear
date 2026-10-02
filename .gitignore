@@ -1,0 +1,8 @@
+build/bin
+node_modules
+frontend/dist
+
+# 打包产物
+dist/
+frontend/.npm-cache/
+tools/spike/
