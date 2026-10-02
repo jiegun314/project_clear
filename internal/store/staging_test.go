@@ -239,3 +239,73 @@ func TestMergeStagingReplacesAReAddedFile(t *testing.T) {
 		t.Errorf("staging files after clear = %+v, want empty", files)
 	}
 }
+
+// 已导入文件列表在整合之后仍保留为这一批的记录，点清空才清空；清空不会动
+// 已整合入库的数据。
+func TestCurrentBatchFilesKeepsTheRecordAfterCommit(t *testing.T) {
+	st := openTestStore(t)
+
+	if files, _, _, err := st.CurrentBatchFiles(); err != nil || len(files) != 0 {
+		t.Fatalf("空库的文件列表 = %+v (%v), want empty", files, err)
+	}
+
+	if _, err := st.SaveStaging(stagedBatch(nil)); err != nil {
+		t.Fatalf("save staging: %v", err)
+	}
+	files, code, state, err := st.CurrentBatchFiles()
+	if err != nil {
+		t.Fatalf("current batch files: %v", err)
+	}
+	if len(files) != 1 || code != "2639" || state != "staging" {
+		t.Fatalf("导入后列表 = %d 个文件 / 周码 %s / %s，want 1 / 2639 / staging", len(files), code, state)
+	}
+
+	// 整合之后这一批不再是 staging，但它仍然是界面上的记录。
+	if _, err := st.Commit("2639"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	files, code, state, err = st.CurrentBatchFiles()
+	if err != nil {
+		t.Fatalf("current batch files after commit: %v", err)
+	}
+	if len(files) != 1 || state != "committed" {
+		t.Fatalf("整合后列表 = %d 个文件 / %s，want 1 / committed（这就是「显示为零」的回归点）", len(files), state)
+	}
+	if files[0].RowsKept == 0 {
+		t.Errorf("记录里的行数丢了: %+v", files[0])
+	}
+
+	// 清空只结束列表，不动已经入库的周数据。
+	if _, err := st.ClearStaging(); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	files, _, state, err = st.CurrentBatchFiles()
+	if err != nil {
+		t.Fatalf("current batch files after clear: %v", err)
+	}
+	if len(files) != 0 || state != "" {
+		t.Fatalf("清空后列表 = %+v / %s, want empty", files, state)
+	}
+	entry, err := st.ArchiveEntryFor("2639")
+	if err != nil || entry == nil {
+		t.Fatalf("清空后已整合的周丢了: %+v %v", entry, err)
+	}
+
+	// 紧接着的下一次导入重新开始一份列表。
+	next := stagedBatch(nil)
+	next.WeekCode = "2640"
+	next.WeekStart = "2026-09-28"
+	next.WeekCodes = []string{"2640"}
+	next.Files[0].WeekCode = "2640"
+	next.Rows[0].Weeks = []string{"130"}
+	if _, err := st.SaveStaging(next); err != nil {
+		t.Fatalf("save next staging: %v", err)
+	}
+	files, code, state, err = st.CurrentBatchFiles()
+	if err != nil {
+		t.Fatalf("current batch files after next import: %v", err)
+	}
+	if len(files) != 1 || code != "2640" || state != "staging" {
+		t.Fatalf("下一次导入后列表 = %d 个文件 / %s / %s, want 1 / 2640 / staging", len(files), code, state)
+	}
+}

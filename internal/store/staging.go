@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"project_clear/internal/mps"
@@ -572,6 +573,13 @@ func (s *Store) ClearStaging() ([]string, error) {
 	}
 	defer tx.Rollback()
 
+	// The marker has to be read before the batch disappears, otherwise an older
+	// committed batch would take its place in the 已导入文件 window.
+	var newest int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(id),0) FROM batch`).Scan(&newest); err != nil {
+		return nil, err
+	}
+
 	rows, err := tx.Query(`SELECT DISTINCT week_code FROM batch WHERE status='staging'`)
 	if err != nil {
 		return nil, err
@@ -592,6 +600,10 @@ func (s *Store) ClearStaging() ([]string, error) {
 	rows.Close()
 
 	if _, err := tx.Exec(`DELETE FROM batch WHERE status='staging'`); err != nil {
+		return nil, err
+	}
+	// 清空 also ends the file list; committed weeks and their records are kept.
+	if err := markFilesClearedTx(tx, newest); err != nil {
 		return nil, err
 	}
 
@@ -659,6 +671,47 @@ func (s *Store) StagingFiles() ([]StagedFileDetail, error) {
 		return []StagedFileDetail{}, nil
 	}
 	return s.StagedFiles(sum.BatchID)
+}
+
+// metaFilesCleared remembers the newest batch whose file list the user has
+// already cleared with 清空, so the toolbar can start from an empty list again
+// without deleting anything that was integrated.
+const metaFilesCleared = "files_cleared_upto"
+
+// CurrentBatchFiles returns the work set the 已导入文件 window shows: the
+// staging batch while it is still open, and after 整合 the batch that was just
+// integrated — it stays on screen as the record of that import until the user
+// presses 清空 (which only moves the marker forward) or imports something new.
+//
+// The second and third results are the week code and the batch status
+// ("staging" or "committed"); both are empty when there is nothing to show.
+func (s *Store) CurrentBatchFiles() ([]StagedFileDetail, string, string, error) {
+	var id int64
+	var weekCode, status string
+	err := s.db.QueryRow(
+		`SELECT id, week_code, status FROM batch
+		  WHERE id > COALESCE((SELECT CAST(value AS INTEGER) FROM app_meta WHERE key=?), 0)
+		  ORDER BY id DESC LIMIT 1`, metaFilesCleared).Scan(&id, &weekCode, &status)
+	if err == sql.ErrNoRows {
+		return []StagedFileDetail{}, "", "", nil
+	}
+	if err != nil {
+		return nil, "", "", err
+	}
+	files, err := s.StagedFiles(id)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return files, weekCode, status, nil
+}
+
+// markFilesClearedTx records 清空 for every batch up to and including upto.
+func markFilesClearedTx(tx *sql.Tx, upto int64) error {
+	_, err := tx.Exec(
+		`INSERT INTO app_meta(key,value) VALUES(?,?)
+		 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+		metaFilesCleared, strconv.FormatInt(upto, 10))
+	return err
 }
 
 var _ = strings.TrimSpace

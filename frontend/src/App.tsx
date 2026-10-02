@@ -282,9 +282,14 @@ export default function App() {
       status?.hasStaging && status.stagedRows > 0
         ? `（周码 ${status.weekCode} · ${status.stagedRows.toLocaleString()} 行）`
         : '';
+    // After 整合 there is no temporary data left, but the 已导入文件 list keeps
+    // showing that batch as its record; clearing it must not touch the week.
+    const recordOnly = !status?.hasStaging && (stagedFiles?.fileCount ?? 0) > 0;
     Modal.confirm({
-      title: '清空临时数据？',
-      content: `将删除所有已导入但尚未整合入库的临时数据${staged}，已整合入库的数据不受影响。此操作不可撤销。`,
+      title: recordOnly ? '清空已导入文件列表？' : '清空临时数据？',
+      content: recordOnly
+        ? '当前没有未整合的临时数据，将只清空「已导入文件」列表；已整合入库的数据不受影响。'
+        : `将删除所有已导入但尚未整合入库的临时数据${staged}，已整合入库的数据不受影响。此操作不可撤销。`,
       okText: '清空',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -298,7 +303,9 @@ export default function App() {
             text:
               r && r.rows > 0
                 ? `已清空临时数据：周码 ${r.weekCode}，共 ${r.rows.toLocaleString()} 行`
-                : '已清空临时数据',
+                : recordOnly
+                  ? '已清空导入文件列表'
+                  : '已清空临时数据',
           });
           await afterChange();
         } catch (e) {

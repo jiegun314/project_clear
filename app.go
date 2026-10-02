@@ -385,32 +385,33 @@ func mustStagingWeek(a *App) string {
 // the integration list right now and how many rows they brought in. 清空 leaves
 // the list empty again.
 type StagingFilesView struct {
-	HasStaging bool                     `json:"hasStaging"`
-	FileCount  int                      `json:"fileCount"`
-	RowCount   int                      `json:"rowCount"`
-	Failed     int                      `json:"failedCount"`
+	HasStaging bool `json:"hasStaging"`
+	FileCount  int  `json:"fileCount"`
+	RowCount   int  `json:"rowCount"`
+	Failed     int  `json:"failedCount"`
+	// BatchState is "staging" while the list is still waiting for 整合 and
+	// "committed" when it is the record of the batch that was just integrated.
+	BatchState string                   `json:"batchState"`
 	Files      []store.StagedFileDetail `json:"files"`
 }
 
-// GetStagingFiles lists the files that were imported (or added) but not yet
-// integrated into a weekly table.
+// GetStagingFiles lists the work set behind the toolbar's 已导入文件 button: the
+// files that were imported (or added), and — after 整合 — the same list as the
+// record of that import. It stays until 清空 or the next import.
 func (a *App) GetStagingFiles() (*StagingFilesView, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
 	out := &StagingFilesView{Files: []store.StagedFileDetail{}}
-	sum, err := a.db.LoadStaging()
+	files, _, state, err := a.db.CurrentBatchFiles()
 	if err != nil {
 		return nil, err
 	}
-	if !sum.HasStaging {
+	if len(files) == 0 {
 		return out, nil
 	}
-	files, err := a.db.StagingFiles()
-	if err != nil {
-		return nil, err
-	}
-	out.HasStaging = true
+	out.HasStaging = state == "staging"
+	out.BatchState = state
 	out.Files = files
 	for _, f := range files {
 		if f.Status == "ok" {
@@ -441,9 +442,8 @@ func (a *App) ClearStaging() (*ClearStagingResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !sum.HasStaging {
-		return &ClearStagingResult{}, nil
-	}
+	// 清空 always runs: with no staging left it only ends the 已导入文件 list
+	// (the record of the batch that was just integrated).
 	rows, err := a.svc.ClearStaging()
 	if err != nil {
 		return nil, err

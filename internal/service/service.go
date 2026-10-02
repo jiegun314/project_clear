@@ -459,6 +459,13 @@ func (s *Service) ClearStaging() (int, error) {
 		return 0, err
 	}
 	if !sum.HasStaging {
+		// Nothing to delete, but 清空 also ends the 已导入文件 list, which keeps
+		// showing the batch that was integrated until then.
+		if _, err := s.db.ClearStaging(); err != nil {
+			s.log.Error("清空", "清空导入文件列表失败: %v", err)
+			return 0, err
+		}
+		s.log.Success("清空", "已清空导入文件列表（没有未整合的临时数据）")
 		return 0, nil
 	}
 

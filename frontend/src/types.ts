@@ -98,6 +98,8 @@ export interface StagingFilesView {
   fileCount: number;
   rowCount: number;
   failedCount: number;
+  /** "staging" while it still waits for 整合, "committed" after it. */
+  batchState?: string;
   files: StagedFile[];
 }
 

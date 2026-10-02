@@ -56,7 +56,16 @@ export function Toolbar(p: ToolbarProps) {
     { key: 'import', icon: <FolderInput size={18} />, label: '导入文件夹中的所有源文件', onClick: p.onImport, primary: true },
     { key: 'add', icon: <FilePlus2 size={18} />, label: '添加单个源文件', onClick: p.onAdd, primary: true },
     { key: 'commit', icon: <DatabaseArrowDown size={18} />, label: '整合：将临时数据写入永久周数据表', onClick: p.onCommit, disabled: !p.hasStaging },
-    { key: 'clear', icon: <Trash2 size={18} />, label: '清空：删除所有已导入但未整合的临时数据', onClick: p.onClear, danger: true, disabled: !p.hasStaging },
+    {
+      key: 'clear',
+      icon: <Trash2 size={18} />,
+      label: '清空：删除所有已导入但未整合的临时数据，并清空已导入文件列表',
+      onClick: p.onClear,
+      danger: true,
+      // After 整合 the temporary rows are gone, but the file list stays on
+      // screen as the record of that import until it is cleared here.
+      disabled: !p.hasStaging && !(p.stagedFiles?.fileCount ?? 0),
+    },
     { key: 'export', icon: <FileDown size={18} />, label: '导出：纯数据或原文件格式（仅 MPS 页）', onClick: p.onExport, disabled: !p.hasStaging && !p.hasArchive },
   ];
 
