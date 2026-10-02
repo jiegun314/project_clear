@@ -125,7 +125,14 @@ func (s *Service) ingest(action string, paths []string, progress Progress) (*Imp
 
 	start := time.Now()
 	cfg := s.cfg.Get()
-	res := &ImportResult{Action: action, Total: len(paths), Files: []FileResult{}, Warnings: []string{}}
+	res := &ImportResult{
+		Action:     action,
+		Total:      len(paths),
+		Files:      []FileResult{},
+		Warnings:   []string{},
+		WeekCodes:  []mps.Week{},
+		IndexNames: []string{},
+	}
 	dict := mps.NewStyleDict()
 
 	var canonical *mps.Header

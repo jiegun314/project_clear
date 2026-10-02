@@ -36,6 +36,8 @@ export function QueryData(arg1:main.GridQuery):Promise<store.GridResult>;
 
 export function Quit():Promise<void>;
 
+export function ReportFrontendError(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function ResetConfig():Promise<main.ConfigView>;
 
 export function RevealExport(arg1:string):Promise<void>;

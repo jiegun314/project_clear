@@ -94,7 +94,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
   }, [load]);
 
   const indexCols = useMemo<ColumnsType<GridRow>>(() => {
-    const names = header?.indexNames ?? [];
+    const names: string[] = header?.indexNames ?? [];
     return names.map((name, i) => ({
       title: (
         <Tooltip title={`第 ${i + 1} 列 · 固定索引`}>
@@ -118,6 +118,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
   }, [header]);
 
   const weekCols = useMemo<ColumnsType<GridRow>>(() => {
+    // Go marshals a nil slice as null, so the array is never assumed here.
     const weeks: Week[] = header?.weeks ?? [];
     return weeks.map((w, i) => ({
       title: (
@@ -199,7 +200,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
           </Tag>
         )}
         <span style={{ marginLeft: 'auto', fontWeight: 400, opacity: 0.92, fontSize: 12 }}>
-          共 {total.toLocaleString()} 行 · {header?.weeks.length ?? 0} 个周列
+          共 {total.toLocaleString()} 行 · {header?.weeks?.length ?? 0} 个周列
         </span>
       </div>
 

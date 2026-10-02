@@ -4,6 +4,43 @@
   <meta charset="UTF-8" />
   <meta content="width=device-width, initial-scale=1.0" name="viewport" />
   <title>CLEAR - MPS 数据整合平台</title>
+  <script>
+    // Installed before the module bundle so a failure *inside* the bundle is
+    // still captured: a module-evaluation error would otherwise leave a blank
+    // window with nothing to go on.
+    (function () {
+      function report(kind, message, stack) {
+        var pre = document.getElementById('boot-error');
+        if (!pre) {
+          pre = document.createElement('pre');
+          pre.id = 'boot-error';
+          pre.style.cssText =
+            'position:fixed;inset:0;z-index:99999;margin:0;padding:24px;overflow:auto;' +
+            'background:#fff;color:#D71920;font:12px/1.6 ui-monospace,Menlo,monospace;white-space:pre-wrap';
+          document.addEventListener('DOMContentLoaded', function () {
+            document.body.appendChild(pre);
+          });
+        }
+        pre.textContent += '[' + kind + '] ' + message + '\n' + (stack || '') + '\n\n';
+        try {
+          if (window.go && window.go.main && window.go.main.App) {
+            window.go.main.App.ReportFrontendError(String(message), String(stack || ''), '启动');
+          }
+        } catch (e) { /* backend not ready yet */ }
+      }
+      window.addEventListener('error', function (e) {
+        if (e.target && e.target !== window && e.target.src) {
+          report('资源加载失败', '无法加载: ' + e.target.src, '');
+          return;
+        }
+        report('脚本错误', e.message, e.error && e.error.stack);
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e.reason || {};
+        report('未处理的异步异常', r.message || String(e.reason), r.stack || '');
+      });
+    })();
+  </script>
 </head>
 <body>
 <div id="root"></div>

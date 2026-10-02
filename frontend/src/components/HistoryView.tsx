@@ -83,7 +83,7 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
   }, [load]);
 
   const columns = useMemo<ColumnsType<GridRow>>(() => {
-    const names = header?.indexNames ?? [];
+    const names: string[] = header?.indexNames ?? [];
     const base: ColumnsType<GridRow> = names.map((name, i) => ({
       title: <Tooltip title={`固定索引 第 ${i + 1} 列`}><span>{name || `列${i + 1}`}</span></Tooltip>,
       dataIndex: ['index', i],

@@ -18,16 +18,17 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:            "CLEAR - MPS 数据整合平台",
-		Width:            1480,
-		Height:           940,
-		MinWidth:         1080,
-		MinHeight:        680,
-		StartHidden:      false,
+		Title:             "CLEAR - MPS 数据整合平台",
+		Width:             1480,
+		Height:            940,
+		MinWidth:          1080,
+		MinHeight:         680,
+		StartHidden:       false,
 		HideWindowOnClose: false,
-		BackgroundColour: &options.RGBA{R: 244, G: 244, B: 245, A: 1},
-		OnStartup:        app.startup,
-		AssetServer:      &assetserver.Options{Assets: assets},
+		BackgroundColour:  &options.RGBA{R: 244, G: 244, B: 245, A: 1},
+		OnStartup:         app.startup,
+		OnDomReady:        app.domReady,
+		AssetServer:       &assetserver.Options{Assets: assets},
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
 			WebviewIsTransparent: false,

@@ -227,7 +227,9 @@ func (s *Store) ListArchive() ([]ArchiveEntry, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []ArchiveEntry
+	// A nil slice marshals to JSON null, which the frontend would then have to
+	// guard everywhere. Empty lists are always emitted as [].
+	out := []ArchiveEntry{}
 	for rows.Next() {
 		var e ArchiveEntry
 		var weekCodes, indexNames string
@@ -286,7 +288,7 @@ func (s *Store) AvailableYears() ([]int, error) {
 		return nil, err
 	}
 	seen := map[int]bool{}
-	var out []int
+	out := []int{}
 	for _, e := range list {
 		if e.Year > 0 && !seen[e.Year] {
 			seen[e.Year] = true
@@ -303,7 +305,7 @@ func (s *Store) WeeksOfYear(year int) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []int
+	out := []int{}
 	for _, e := range list {
 		if e.Year == year {
 			out = append(out, e.WeekNo)

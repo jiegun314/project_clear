@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"project_clear/internal/config"
 	"project_clear/internal/logging"
@@ -41,6 +42,12 @@ type App struct {
 
 // NewApp builds the application object.
 func NewApp() *App { return &App{} }
+
+// domReady fires when the webview finished loading the document.
+func (a *App) domReady(ctx context.Context) {
+	w, h := wr.WindowGetSize(ctx)
+	a.log.Info("界面", "页面加载完成，窗口尺寸 %dx%d", w, h)
+}
 
 // startup runs once when Wails brings the backend up.
 func (a *App) startup(ctx context.Context) {
@@ -77,6 +84,15 @@ func (a *App) boot() error {
 	a.svc = service.New(cfg, a.log, db, dataDir)
 
 	a.log.Success("启动", "%s v%s 已就绪，数据库 %s", AppName, AppVersion, filepath.Join(dataDir, "clear.db"))
+
+	// Make sure the window is actually on screen with a usable size.
+	go func() {
+		time.Sleep(1200 * time.Millisecond)
+		w, h := wr.WindowGetSize(a.ctx)
+		a.log.Info("界面", "启动后窗口尺寸 %dx%d", w, h)
+		wr.WindowShow(a.ctx)
+		wr.WindowUnminimise(a.ctx)
+	}()
 
 	// Stream log entries to every open window so the log panel updates live.
 	go a.streamLogs()
@@ -414,7 +430,11 @@ func (a *App) GetGridHeader(source string) (*GridHeader, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	out := &GridHeader{Source: source}
+	out := &GridHeader{
+		Source:     source,
+		IndexNames: []string{},
+		Weeks:      []mps.Week{},
+	}
 	var codes, names []string
 	if source == "" {
 		sum, err := a.db.LoadStaging()
@@ -443,7 +463,9 @@ func (a *App) GetGridHeader(source string) (*GridHeader, error) {
 		out.WeekStart = entry.WeekStart
 		codes, names = entry.WeekCodes, entry.IndexNames
 	}
-	out.IndexNames = names
+	if names != nil {
+		out.IndexNames = names
+	}
 	for _, c := range codes {
 		w, err := mps.ParseWeekCode(c)
 		if err != nil {
@@ -529,6 +551,22 @@ func (a *App) ResetConfig() (*ConfigView, error) {
 
 // ---------------------------------------------------------------- logs
 
+// ReportFrontendError records a webview-side exception in the same log the
+// status bar shows, so a rendering failure is diagnosable instead of blank.
+func (a *App) ReportFrontendError(message, stack, source string) {
+	if a.log == nil {
+		return
+	}
+	where := source
+	if where == "" {
+		where = "界面"
+	}
+	a.log.Error(where, "前端异常: %s", message)
+	if stack != "" {
+		a.log.Error(where, "调用栈: %s", truncate(stack, 2000))
+	}
+}
+
 // GetLogs returns the most recent log entries.
 func (a *App) GetLogs(limit int) []logging.Entry {
 	if a.log == nil {
@@ -552,6 +590,13 @@ func (a *App) ClearLogs() {
 // overlays inside the main window rather than as separate OS windows.
 
 // Quit shuts the application down.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + " …"
+}
+
 func (a *App) Quit() {
 	if a.db != nil {
 		_ = a.db.Close()

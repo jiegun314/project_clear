@@ -36,6 +36,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [historyWeek, setHistoryWeek] = useState<string | null>(null);
+  // The main grid follows the working set: the staging area right after an
+  // import, and the committed week once the data has been integrated. Without
+  // this the grid would empty out at the moment the user integrates.
+  const [gridSource, setGridSource] = useState('');
   const [notice, setNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -78,6 +82,7 @@ export default function App() {
       if (res) {
         setImportResult(res);
         setImportOpen(true);
+        setGridSource('');
         await afterChange();
       }
     } catch (e) {
@@ -93,6 +98,7 @@ export default function App() {
     setProgress({ stage: '整合入库', done: 0, total: 1 });
     try {
       const r: CommitResult = await api.commit();
+      setGridSource(r.weekCode);
       setNotice({
         type: 'success',
         text: `周码 ${r.weekCode}（${r.weekStart}）已整合入库：${r.rowCount.toLocaleString()} 行 / ${r.fileCount} 个文件${r.overwrote ? '，已覆盖原有数据' : ''}`,
@@ -180,7 +186,7 @@ export default function App() {
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', padding: '8px 10px 0' }}>
         <div style={{ flex: '1 1 62%', minHeight: 200, display: 'flex', flexDirection: 'column' }}>
           <DataGrid
-            source=""
+            source={gridSource}
             headerDisplay={cfg.headerDisplay}
             pageSize={cfg.pageSize}
             reloadToken={reloadToken}

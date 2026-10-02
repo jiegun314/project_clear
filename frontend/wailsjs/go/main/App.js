@@ -62,6 +62,10 @@ export function Quit() {
   return window['go']['main']['App']['Quit']();
 }
 
+export function ReportFrontendError(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ReportFrontendError'](arg1, arg2, arg3);
+}
+
 export function ResetConfig() {
   return window['go']['main']['App']['ResetConfig']();
 }
