@@ -7,3 +7,6 @@ frontend/dist
 dist/
 frontend/.npm-cache/
 tools/spike/
+
+# 真实业务数据（含供应商/工厂/SKU/周需求），仅本地测试用，不入库
+raw_data/
