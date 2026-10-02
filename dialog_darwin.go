@@ -24,12 +24,17 @@ void clearTestSendTrickyPaths(void);
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
 	"unsafe"
 )
+
+// setDialogContext is a no-op on macOS: the NSOpenPanel shim talks to AppKit
+// directly and never needs the Wails runtime context.
+func setDialogContext(context.Context) {}
 
 // panelResult is what the ObjC side hands back.
 type panelResult struct {

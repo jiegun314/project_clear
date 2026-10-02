@@ -23,7 +23,7 @@ import (
 const (
 	AppName    = "CLEAR"
 	AppFull    = "Consolidation & Loading of Enterprise Analytics for Replenishment"
-	AppVersion = "1.5.0"
+	AppVersion = "1.5.1"
 )
 
 // App is the object whose exported methods are bound to the frontend.
@@ -55,6 +55,9 @@ func (a *App) domReady(ctx context.Context) {
 // startup runs once when Wails brings the backend up.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// The non-macOS file pickers go through the Wails runtime, which needs the
+	// context; on macOS this is a no-op.
+	setDialogContext(ctx)
 	a.bootOnce.Do(func() {
 		a.bootErr = a.boot()
 		close(a.bootDone)

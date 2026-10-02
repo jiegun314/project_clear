@@ -48,7 +48,8 @@ CLEAR 把 MPS 系统导出的 Excel 周报表合并成本地数据库，并按�
 
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
-| macOS | 13 及以上 | 当前验收平台。文件选择器由 Objective-C 调用 `NSOpenPanel` 实现 |
+| macOS | 13 及以上 | 主要验收平台。文件选择器由 Objective-C 调用 `NSOpenPanel` 实现 |
+| Windows | 10 / 11（x64） | 已提供打包版本。文件选择器走 Wails 内置的系统对话框，需要 WebView2 运行时（一般已预装） |
 | Go | 1.26+ | 与 `go.mod` 的 `go 1.26.0` 一致 |
 | Node.js | 20.19+ / 22.12+ | Vite 7 的最低要求，附 npm |
 | Wails CLI | v2.16 | `github.com/wailsapp/wails/v2/cmd/wails@v2.16.0` |
@@ -102,7 +103,7 @@ wails dev
 wails build -clean
 
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.5.0-darwin-<架构>.zip
+# 并打包成 dist/CLEAR-1.5.1-darwin-<架构>.zip
 ./scripts/build-darwin.sh
 ```
 
@@ -333,6 +334,8 @@ go run ./tools/e2e -in raw_data/mps_data -out /tmp/clear-e2e -clean   # 纯数�
 ```
 main.go / app.go          Wails 入口与前端绑定（导入/添加/整合/清空/导出/状态/日志）
 dialog_darwin.go(.m)      macOS 原生文件选择器（NSOpenPanel，主线程调用）
+dialog_other.go           Windows / Linux 文件选择器（Wails 内置系统对话框）
+dialog_options.go         两套选择器共用的选项映射（含单测）
 internal/config           YAML 参数与默认文件自举
 internal/logging          内存环形缓冲 + 按日落盘
 internal/mps              读取、周码模型、条件格式、批注、导出
@@ -400,9 +403,11 @@ excelize 只认传统批注，所以导出时会把数据区残留的线程批�
 
 - **Wails v2 是单窗口框架**（`WindowCreate` 自 v3 起才提供）。需求中的
   “弹出单独窗口”因此实现为应用内的全屏遮罩层，功能与交互一致，但不是独立 OS 窗口。
-- **文件选择器目前只有 macOS 实现**（Objective-C + `NSOpenPanel`，必须从主线程调用，
-  Wails 自带的对话框在 v2 里会因线程问题被系统丢弃）。其他平台运行到导入/添加时会提示
-  「当前平台的文件选择器尚未实现」。
+- **文件选择器有两套实现**：macOS 走 Objective-C + `NSOpenPanel`（必须从主线程调用，
+  否则 Wails v2 自带的对话框会被 AppKit 直接丢弃）；Windows / Linux 走 Wails 内置的
+  系统对话框（`OpenFileDialog` / `OpenDirectoryDialog` / `SaveFileDialog`），
+  选项映射有单测覆盖。Windows 版已通过 `windows/amd64` 交叉编译与静态检查，
+  但尚未在 Windows 真机上做验收。
 - 表头不一致的文件按需求判为失败跳过，不会自动按周码对齐补列。
 - **批注导出为传统批注。** 线程批注的正文、作者、回复都会保留，但 Excel 里显示的
   是经典便签而不是线程批注气泡；excelize 不支持写入线程批注。
