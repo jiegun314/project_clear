@@ -14,6 +14,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// appIcon is the artwork used by the macOS About panel. The Dock/Finder icon
+// comes from build/appicon.png, which the packager turns into iconfile.icns.
+//
+//go:embed clear.png
+var appIcon []byte
+
 func main() {
 	app := NewApp()
 
@@ -30,12 +36,16 @@ func main() {
 		OnDomReady:        app.domReady,
 		AssetServer:       &assetserver.Options{Assets: assets},
 		Mac: &mac.Options{
-			TitleBar:             mac.TitleBarHiddenInset(),
+			// The title bar is deliberately left as the native one. A hidden
+			// inset bar makes the window stop behaving like a key window on
+			// macOS, which both overlaps the traffic lights over the toolbar
+			// and makes every NSOpenPanel sheet dismiss itself immediately.
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			About: &mac.AboutInfo{
 				Title:   "CLEAR",
 				Message: AppFull + "\n\nMPS 数据整合与补货分析平台\n版本 " + AppVersion,
+				Icon:    appIcon,
 			},
 		},
 		Bind: []any{app},

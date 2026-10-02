@@ -85,13 +85,14 @@ func (a *App) boot() error {
 
 	a.log.Success("启动", "%s v%s 已就绪，数据库 %s", AppName, AppVersion, filepath.Join(dataDir, "clear.db"))
 
-	// Make sure the window is actually on screen with a usable size.
+	// The window state is deliberately left alone here. Calling WindowShow or
+	// WindowUnminimise after start-up can take the key-window status away at
+	// exactly the moment a native panel is presented, which makes a file
+	// dialog flash and close.
 	go func() {
 		time.Sleep(1200 * time.Millisecond)
 		w, h := wr.WindowGetSize(a.ctx)
-		a.log.Info("界面", "启动后窗口尺寸 %dx%d", w, h)
-		wr.WindowShow(a.ctx)
-		wr.WindowUnminimise(a.ctx)
+		a.log.Info("界面", "窗口尺寸 %dx%d", w, h)
 	}()
 
 	// Stream log entries to every open window so the log panel updates live.
@@ -140,6 +141,33 @@ type AppInfo struct {
 	Database   string `json:"database"`
 	GoVersion  string `json:"goVersion"`
 	Platform   string `json:"platform"`
+}
+
+// lastDir is where the chooser should open; the last folder used is the most
+// useful default for a weekly batch job.
+func (a *App) lastDir() string {
+	c := a.cfg.Get()
+	if c.ExportDir != "" {
+		return c.ExportDir
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, "Documents")
+	}
+	return ""
+}
+
+func (a *App) rememberDir(dir string) {
+	if dir == "" {
+		return
+	}
+	c := a.cfg.Get()
+	if c.ExportDir == dir {
+		return
+	}
+	c.ExportDir = dir
+	if _, err := a.cfg.Save(c); err != nil {
+		a.log.Warn("参数", "保存目录失败: %v", err)
+	}
 }
 
 // GetAppInfo returns the About-window payload.
@@ -220,15 +248,15 @@ func (a *App) ImportFolder() (*service.ImportResult, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	dir, err := wr.OpenDirectoryDialog(a.ctx, wr.OpenDialogOptions{
-		Title: "选择包含 MPS 源文件的文件夹",
-	})
+	picked, err := selectPaths("选择包含 MPS 源文件的文件夹", a.lastDir(), false, false, nil)
 	if err != nil {
 		return nil, err
 	}
-	if dir == "" {
+	if len(picked) == 0 {
 		return nil, nil // cancelled
 	}
+	dir := picked[0]
+	a.rememberDir(dir)
 	res, err := a.svc.ImportFolder(dir, a.progress)
 	if err != nil {
 		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
@@ -243,17 +271,16 @@ func (a *App) AddFiles() (*service.ImportResult, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	paths, err := wr.OpenMultipleFilesDialog(a.ctx, wr.OpenDialogOptions{
-		Title: "选择 MPS 源文件（可多选）",
-		Filters: []wr.FileFilter{
-			{DisplayName: "Excel 工作簿 (*.xlsm;*.xlsx)", Pattern: "*.xlsm;*.xlsx"},
-		},
-	})
+	paths, err := selectPaths("选择 MPS 源文件（可多选）", a.lastDir(), true, true,
+		[]string{"xlsm", "xlsx"})
 	if err != nil {
 		return nil, err
 	}
 	if len(paths) == 0 {
 		return nil, nil
+	}
+	if len(paths) == 1 {
+		a.rememberDir(filepath.Dir(paths[0]))
 	}
 	res, err := a.svc.AddFiles(paths, a.progress)
 	if err != nil {
@@ -341,20 +368,15 @@ func (a *App) Export(weekCode string, clean bool) (*ExportResult, error) {
 			dir = filepath.Join(home, "Documents")
 		}
 	}
-	dest, err := wr.SaveFileDialog(a.ctx, wr.SaveDialogOptions{
-		Title:            "导出整合数据",
-		DefaultDirectory: dir,
-		DefaultFilename:  fmt.Sprintf("CLEAR_%s%s", weekCode, ext),
-		Filters: []wr.FileFilter{
-			{DisplayName: "Excel 工作簿", Pattern: "*" + ext},
-		},
-	})
+	dest, err := selectSavePath("导出整合数据", fmt.Sprintf("CLEAR_%s%s", weekCode, ext), dir,
+		[]string{strings.TrimPrefix(ext, ".")})
 	if err != nil {
 		return nil, err
 	}
 	if dest == "" {
 		return nil, nil
 	}
+	a.rememberDir(filepath.Dir(dest))
 	if !strings.EqualFold(filepath.Ext(dest), ext) {
 		dest = strings.TrimSuffix(dest, filepath.Ext(dest)) + ext
 	}
@@ -364,11 +386,6 @@ func (a *App) Export(weekCode string, clean bool) (*ExportResult, error) {
 		return nil, err
 	}
 	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
-	// Remember the folder for next time.
-	c.ExportDir = filepath.Dir(dest)
-	if _, err := a.cfg.Save(c); err != nil {
-		a.log.Warn("参数", "保存导出目录失败: %v", err)
-	}
 	return &ExportResult{
 		DestPath: dest, Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
 		Comments: res.Comments, CFRows: res.CFRows, StylesUsed: res.StylesUsed,
