@@ -6,10 +6,9 @@ import (
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// The file pickers of both platforms ask for the same thing, so the option
-// mapping lives here, free of build tags: the macOS build hands it to the
-// NSOpenPanel shim, the other platforms to the Wails dialogs, and it stays
-// unit-testable on every platform.
+// The option mapping for the file pickers lives here, separate from the dialogs
+// themselves, so it stays unit-testable: titles, default directory and the
+// `*.xlsm;*.xlsx` filters the import/add/export pickers ask for.
 
 // excelPatterns turns "xlsm", ".xlsx" into the "*.xlsm;*.xlsx" globs the
 // dialogs expect, ignoring empty entries.

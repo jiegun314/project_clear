@@ -48,8 +48,8 @@ CLEAR 把 MPS 系统导出的 Excel 周报表合并成本地数据库，并按�
 
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
-| macOS | 13 及以上，Apple Silicon（arm64） | 主要验收平台。文件选择器由 Objective-C 调用 `NSOpenPanel` 实现；发布包只出 arm64（通用二进制体积近乎翻倍，见 [3.3 打包](#33-打包)） |
-| Windows | 10 / 11（x64） | 已提供打包版本。文件选择器走 Wails 内置的系统对话框，需要 WebView2 运行时（一般已预装） |
+| macOS | 13 及以上，Apple Silicon（arm64） | 主要验收平台；发布包只出 arm64（通用二进制体积近乎翻倍，见 [3.3 打包](#33-打包)） |
+| Windows | 10 / 11（x64） | 已提供打包版本，需要 WebView2 运行时（一般已预装） |
 | Go | 1.26+ | 与 `go.mod` 的 `go 1.26.0` 一致 |
 | Node.js | 20.19+ / 22.12+ | Vite 7 的最低要求，附 npm |
 | Wails CLI | v2.16 | `github.com/wailsapp/wails/v2/cmd/wails@v2.16.0` |
@@ -341,9 +341,8 @@ go run ./tools/e2e -in raw_data/mps_data -out /tmp/clear-e2e -clean   # 纯数�
 
 ```
 main.go / app.go          Wails 入口与前端绑定（导入/添加/整合/清空/导出/状态/日志）
-dialog_darwin.go(.m)      macOS 原生文件选择器（NSOpenPanel，主线程调用）
-dialog_other.go           Windows / Linux 文件选择器（Wails 内置系统对话框）
-dialog_options.go         两套选择器共用的选项映射（含单测）
+dialog.go                 文件选择器：导入 / 添加 / 导出，三平台统一走 Wails 内置对话框
+dialog_options.go         选择器的选项映射（标题、默认目录、*.xlsm;*.xlsx 过滤器，含单测）
 internal/config           YAML 参数与默认文件自举
 internal/logging          内存环形缓冲 + 按日落盘
 internal/mps              读取、周码模型、条件格式、批注、导出
@@ -411,11 +410,14 @@ excelize 只认传统批注，所以导出时会把数据区残留的线程批�
 
 - **Wails v2 是单窗口框架**（`WindowCreate` 自 v3 起才提供）。需求中的
   “弹出单独窗口”因此实现为应用内的全屏遮罩层，功能与交互一致，但不是独立 OS 窗口。
-- **文件选择器有两套实现**：macOS 走 Objective-C + `NSOpenPanel`（必须从主线程调用，
-  否则 Wails v2 自带的对话框会被 AppKit 直接丢弃）；Windows / Linux 走 Wails 内置的
-  系统对话框（`OpenFileDialog` / `OpenDirectoryDialog` / `SaveFileDialog`），
-  选项映射有单测覆盖。Windows 版已通过 `windows/amd64` 交叉编译与静态检查，
-  但尚未在 Windows 真机上做验收。
+- **文件选择器三平台共用一套实现**（`dialog.go`，Wails 内置的 `OpenDirectoryDialog` /
+  `OpenFileDialog` / `OpenMultipleFilesDialog` / `SaveFileDialog`）。
+  v1.5.2 及以前 macOS 单独用 Objective-C 调 `NSOpenPanel`，是因为 Wails v2 的绑定方法
+  跑在 goroutine 里、面板以 sheet 形式贴在窗口上，早期出现过「面板闪现即关」；后来定位到
+  真正原因是启动时 `WindowShow`/`WindowUnminimise` 抢走了窗口的 key 状态（已在 `b829dd8`
+  移除），本版实测文件夹选择、多选文件（带过滤器）、保存面板三类对话框在 macOS 上开/关/重开
+  均稳定，于是删掉了 shim，工程里不再有 Objective-C 与自带的 cgo 选择器代码。
+  Windows 版已通过 `windows/amd64` 交叉编译与静态检查，但尚未在 Windows 真机上做验收。
 - 表头不一致的文件按需求判为失败跳过，不会自动按周码对齐补列。
 - **批注导出为传统批注。** 线程批注的正文、作者、回复都会保留，但 Excel 里显示的
   是经典便签而不是线程批注气泡；excelize 不支持写入线程批注。
