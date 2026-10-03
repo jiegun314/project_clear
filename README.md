@@ -103,7 +103,7 @@ wails dev
 wails build -platform darwin/arm64 -clean
 
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.5.2-darwin-arm64.zip
+# 并打包成 dist/CLEAR-1.5.3-darwin-arm64.zip
 ./scripts/build-darwin.sh
 ```
 
@@ -412,7 +412,7 @@ excelize 只认传统批注，所以导出时会把数据区残留的线程批�
   “弹出单独窗口”因此实现为应用内的全屏遮罩层，功能与交互一致，但不是独立 OS 窗口。
 - **文件选择器三平台共用一套实现**（`dialog.go`，Wails 内置的 `OpenDirectoryDialog` /
   `OpenFileDialog` / `OpenMultipleFilesDialog` / `SaveFileDialog`）。
-  v1.5.2 及以前 macOS 单独用 Objective-C 调 `NSOpenPanel`，是因为 Wails v2 的绑定方法
+  v1.5.3 起三平台共用同一实现；v1.5.2 及以前 macOS 单独用 Objective-C 调 `NSOpenPanel`，是因为 Wails v2 的绑定方法
   跑在 goroutine 里、面板以 sheet 形式贴在窗口上，早期出现过「面板闪现即关」；后来定位到
   真正原因是启动时 `WindowShow`/`WindowUnminimise` 抢走了窗口的 key 状态（已在 `b829dd8`
   移除），本版实测文件夹选择、多选文件（带过滤器）、保存面板三类对话框在 macOS 上开/关/重开
