@@ -2,7 +2,7 @@ import { Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { MessageSquare } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
-import { formatQuantity, formatWeekStart, rawValueHint } from '../lib/format';
+import { formatQuantity, formatWeekStart, rawValueHint, weekDecimals } from '../lib/format';
 import { WEEK_WIDTH } from '../lib/gridWidth';
 import type { GridRow, Week } from '../types';
 
@@ -46,7 +46,8 @@ export function buildWeekColumns(
     },
     render: (v: string, row: GridRow) => {
       const meta = row.weekMeta?.[i];
-      const text = formatQuantity(v);
+      // WOS (第二列 LOC) 行是"周供应量"，天然带小数，保留一位小数显示。
+      const text = formatQuantity(v, weekDecimals(row.index));
       const n = Number((v ?? '').trim());
       const numeric = Number.isFinite(n);
       // The stored value is a tooltip rather than the display, so a rounded

@@ -9,6 +9,7 @@ import {
   isNumericCell,
   rawValueHint,
   roundHalfAwayFromZero,
+  weekDecimals,
 } from './format.ts';
 
 describe('formatWeekStart', () => {
@@ -65,6 +66,30 @@ describe('formatQuantity', () => {
   it('keeps negative signs and grouping', () => {
     assert.equal(formatQuantity('-48'), '-48');
     assert.equal(formatQuantity('-1234.6'), '-1,235');
+  });
+
+  it('keeps one decimal for the WOS rows', () => {
+    assert.equal(formatQuantity('4.9362083383108351', 1), '4.9');
+    assert.equal(formatQuantity('5.1158054381973788', 1), '5.1');
+    assert.equal(formatQuantity('4.1639569498511566', 1), '4.2');
+    assert.equal(formatQuantity('1234.5678', 1), '1,234.6');
+    assert.equal(formatQuantity('-0.61224489795918369', 1), '-0.6');
+    assert.equal(formatQuantity('5', 1), '5.0', '整数也要补一位小数');
+    assert.equal(formatQuantity('0', 1), DASH);
+    assert.equal(formatQuantity('0.04', 1), DASH, 'rounds to zero, so it is nothing');
+  });
+
+  it('only treats a second LOC of WOS as decimal', () => {
+    const index = new Array(15).fill('');
+    index[11] = 'LOC';
+    index[14] = 'CalcOH';
+    assert.equal(weekDecimals(index), 0, '第一列 LOC 不影响');
+    index[14] = 'wos';
+    assert.equal(weekDecimals(index), 1, '大小写不敏感');
+    index[14] = 'WOS ';
+    assert.equal(weekDecimals(index), 1, '首尾空格忽略');
+    assert.equal(weekDecimals([]), 0);
+    assert.equal(weekDecimals(undefined), 0);
   });
 
   it('leaves text alone', () => {

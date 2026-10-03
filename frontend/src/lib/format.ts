@@ -41,15 +41,37 @@ export function isNumericCell(raw: string | null | undefined): boolean {
  * dash when the value is zero. Anything that is not a number — a part code, a
  * description — is handed back exactly as it came, so nothing is silently
  * rewritten into something it is not.
+ *
+ * `decimals` is 0 for the ordinary rows and 1 for the WOS rows (weeks of
+ * supply), which are decimals by nature: rounding 4.9362 to 5 would hide the
+ * difference between 4.9 and 5.1 weeks.
  */
-export function formatQuantity(raw: string | null | undefined): string {
+export function formatQuantity(raw: string | null | undefined, decimals = 0): string {
   const text = (raw ?? '').trim();
   if (text === '') return DASH;
   const n = Number(text);
   if (!Number.isFinite(n)) return raw ?? '';
+  if (decimals > 0) {
+    const factor = 10 ** decimals;
+    const rounded = roundHalfAwayFromZero(n * factor) / factor;
+    if (rounded === 0) return DASH;
+    return rounded.toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  }
   const rounded = roundHalfAwayFromZero(n);
   if (rounded === 0) return DASH;
   return rounded.toLocaleString('en-US');
+}
+
+/**
+ * Rows whose second LOC column reads "WOS" carry weeks-of-supply, so their
+ * week cells keep one decimal place instead of being rounded to whole numbers.
+ */
+export function weekDecimals(index: string[] | null | undefined): number {
+  const secondLoc = (index?.[14] ?? '').trim().toUpperCase();
+  return secondLoc === 'WOS' ? 1 : 0;
 }
 
 /**
