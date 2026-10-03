@@ -36,7 +36,10 @@ export function buildWeekColumns(
     width: WEEK_WIDTH,
     align: 'right' as const,
     // The source cell's own fill colour is carried through the database, so a
-    // row looks the way it looked in the workbook.
+    // row looks the way it looked in the workbook. It is painted on the cell
+    // content rather than through `onCell`: WKWebView (the macOS shell) drops
+    // the style antd puts on <td>, while Chromium keeps it, so `onCell` alone
+    // showed colours in the browser harness but not in the application.
     onCell: (row: GridRow) => {
       const meta = row.weekMeta?.[i];
       return meta?.color ? { style: { background: meta.color } } : {};
@@ -53,11 +56,17 @@ export function buildWeekColumns(
       return (
         <span
           style={{
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
             gap: 4,
-            width: '100%',
+            // Cover the whole cell, padding included, without changing the row
+            // height: the negative margin cancels antd's 8px cell padding.
+            margin: '-8px -8px',
+            padding: '8px 8px',
+            minHeight: 22,
+            background: meta?.color,
+            boxSizing: 'content-box',
           }}
         >
           <span style={{ color, fontVariantNumeric: 'tabular-nums' }} title={hint || undefined}>
