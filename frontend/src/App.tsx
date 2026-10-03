@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { App as AntApp, Modal, Tag, Tooltip, Spin, Alert } from 'antd';
+import { CircleCheck } from 'lucide-react';
 import { Toolbar } from './components/Toolbar';
 import { DataGrid } from './components/DataGrid';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -12,6 +13,12 @@ import { StagedFilesModal } from './components/StagedFilesModal';
 import { JNJ } from './theme/jnj';
 import { api, hasBackend, onEvent } from './services/api';
 import { SPLIT_BAR, TOP_MIN_HEIGHT, clampLower, lowerAfterDrag, splitBounds } from './lib/split';
+import {
+  acceptProgress,
+  finishedProgress,
+  progressText,
+  type TaskProgress,
+} from './lib/taskProgress';
 import type {
   AppConfig,
   CommitResult,
@@ -20,12 +27,6 @@ import type {
   StagingFilesView,
   Status,
 } from './types';
-
-interface Progress {
-  stage: string;
-  done: number;
-  total: number;
-}
 
 export default function App() {
   const [cfg, setCfg] = useState<AppConfig>({
@@ -39,7 +40,10 @@ export default function App() {
   });
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const [progress, setProgress] = useState<TaskProgress | null>(null);
+  // 后端在任务结束后还会补一条 "完成 N/N" 进度事件，它比 await 的回调更晚到达；
+  // 用这个开关把"迟到的事件"挡掉，状态栏才不会一直停在红色运行中。
+  const taskRunning = useRef(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -49,6 +53,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [historyWeek, setHistoryWeek] = useState<string | null>(null);
+  // 历史数据量大，点开要等一会儿：点击那一刻就把全屏遮罩盖上，
+  // 数据到位（或确认没有数据）后由 HistoryView 通知收起。
+  const [historyLoading, setHistoryLoading] = useState(false);
   // The main grid follows the working set: the staging area right after an
   // import, and the committed week once the data has been integrated. Without
   // this the grid would empty out at the moment the user integrates.
@@ -164,7 +171,10 @@ export default function App() {
   }, [refresh]);
 
   useEffect(() => {
-    const offProgress = onEvent<Progress>('task:progress', (p) => setProgress(p));
+    const offProgress = onEvent<TaskProgress>('task:progress', (p) => {
+      const accepted = acceptProgress(taskRunning.current, p);
+      if (accepted) setProgress(accepted);
+    });
     const offDone = onEvent<{ ok: boolean; message?: string }>('task:done', (d) => {
       if (d && !d.ok && d.message) setNotice({ type: 'error', text: d.message });
     });
@@ -181,6 +191,13 @@ export default function App() {
 
   // ---- actions --------------------------------------------------------
 
+  /** 任务收尾：成功时留下绿色"完成"，失败或取消则清掉进度显示。 */
+  const finishTask = (ok: boolean) => {
+    taskRunning.current = false;
+    setBusy(false);
+    setProgress(ok ? finishedProgress() : null);
+  };
+
   const finishImport = async (res: ImportResult) => {
     setImportResult(res);
     setImportOpen(true);
@@ -190,7 +207,9 @@ export default function App() {
 
   const runImport = async (kind: 'import' | 'add') => {
     setBusy(true);
+    taskRunning.current = true;
     setProgress({ stage: '准备中', done: 0, total: 0 });
+    let ok = false;
     try {
       const res = kind === 'import' ? await api.importFolder() : await api.addFiles();
       if (!res) return;
@@ -213,32 +232,38 @@ export default function App() {
           cancelText: '取消',
           onOk: async () => {
             setBusy(true);
+            taskRunning.current = true;
             setProgress({ stage: '重新读取', done: 0, total: 1 });
+            let overwrote = false;
             try {
               const again = await api.confirmAddFiles(res.pendingPaths ?? []);
-              if (again) await finishImport(again);
+              if (again) {
+                await finishImport(again);
+                overwrote = true;
+              }
             } catch (e) {
               setNotice({ type: 'error', text: errorText(e) });
             } finally {
-              setBusy(false);
-              setProgress(null);
+              finishTask(overwrote);
             }
           },
         });
         return;
       }
       await finishImport(res);
+      ok = true;
     } catch (e) {
       setNotice({ type: 'error', text: errorText(e) });
     } finally {
-      setBusy(false);
-      setProgress(null);
+      finishTask(ok);
     }
   };
 
   const runCommit = async () => {
     setBusy(true);
+    taskRunning.current = true;
     setProgress({ stage: '整合入库', done: 0, total: 1 });
+    let ok = false;
     try {
       const r: CommitResult = await api.commit();
       setGridSource(r.weekCode);
@@ -247,32 +272,44 @@ export default function App() {
         text: `周码 ${r.weekCode}（${r.weekStart}）已整合入库：${r.rowCount.toLocaleString()} 行 / ${r.fileCount} 个文件${r.overwrote ? '，已覆盖原有数据' : ''}`,
       });
       await afterChange();
+      ok = true;
     } catch (e) {
       setNotice({ type: 'error', text: errorText(e) });
     } finally {
-      setBusy(false);
-      setProgress(null);
+      finishTask(ok);
     }
   };
 
-  const runExport = async () => {
+  /**
+   * 导出：工具栏用当前临时/周数据的周码，历史数据窗口用它在看的那一周。
+   * 两条路径都必须经过这里，状态栏的进度与完成标记才有一致的来源。
+   */
+  const runExport = async (weekCode?: string, mode = ''): Promise<ExportResult | null> => {
     setBusy(true);
+    taskRunning.current = true;
     setProgress({ stage: '导出', done: 0, total: 2 });
+    let ok = false;
     try {
       // Empty mode: the toolbar follows whatever 参数设定 says (纯数据 by default).
-      const r: ExportResult | null = await api.export(status?.weekCode ?? '', '');
-      if (r) {
-        setNotice({
-          type: 'success',
-          text: `已导出 ${r.rows.toLocaleString()} 行 × ${r.cols} 列（${r.mode === 'clean' ? '纯数据' : '原文件格式'}，条件格式 ${r.cfRows} 行、备注 ${r.comments} 条、宏${r.preservedVba ? '已保留' : '未包含'}）→ ${r.destPath}`,
-        });
-      }
+      const r: ExportResult | null = await api.export(weekCode ?? status?.weekCode ?? '', mode);
+      ok = Boolean(r);
+      return r;
     } catch (e) {
       setNotice({ type: 'error', text: errorText(e) });
+      return null;
     } finally {
-      setBusy(false);
-      setProgress(null);
+      finishTask(ok);
     }
+  };
+
+  /** 工具栏的导出：模式跟随参数设定，完成后给出完整摘要。 */
+  const runToolbarExport = async () => {
+    const r = await runExport();
+    if (!r) return;
+    setNotice({
+      type: 'success',
+      text: `已导出 ${r.rows.toLocaleString()} 行 × ${r.cols} 列（${r.mode === 'clean' ? '纯数据' : '原文件格式'}，条件格式 ${r.cfRows} 行、备注 ${r.comments} 条、宏${r.preservedVba ? '已保留' : '未包含'}）→ ${r.destPath}`,
+    });
   };
 
   // 清空 is destructive and cannot be undone, so it always asks first; the
@@ -295,6 +332,9 @@ export default function App() {
       cancelText: '取消',
       onOk: async () => {
         setBusy(true);
+        taskRunning.current = true;
+        setProgress({ stage: '清空', done: 0, total: 1 });
+        let ok = false;
         try {
           const r = await api.clearStaging();
           setGridSource('');
@@ -308,10 +348,11 @@ export default function App() {
                   : '已清空临时数据',
           });
           await afterChange();
+          ok = true;
         } catch (e) {
           setNotice({ type: 'error', text: errorText(e) });
         } finally {
-          setBusy(false);
+          finishTask(ok);
         }
       },
     });
@@ -351,7 +392,7 @@ export default function App() {
         onAdd={() => void runImport('add')}
         onCommit={() => void runCommit()}
         onClear={runClear}
-        onExport={() => void runExport()}
+        onExport={() => void runToolbarExport()}
         onViewStagedFiles={() => setStagedOpen(true)}
         onSettings={() => setSettingsOpen(true)}
         onAbout={() => setAboutOpen(true)}
@@ -426,7 +467,13 @@ export default function App() {
             borderTop: `1px solid ${JNJ.border}`,
           }}
         >
-          <HistoryPanel onView={(w) => setHistoryWeek(w)} reloadToken={reloadToken} />
+          <HistoryPanel
+            onView={(w) => {
+              setHistoryLoading(true);
+              setHistoryWeek(w);
+            }}
+            reloadToken={reloadToken}
+          />
           <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
             <LogPanel />
           </div>
@@ -448,14 +495,39 @@ export default function App() {
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
       <HistoryView
         weekCode={historyWeek}
-        onClose={() => setHistoryWeek(null)}
+        onClose={() => {
+          setHistoryWeek(null);
+          setHistoryLoading(false);
+        }}
         onExported={(m) => setNotice({ type: 'success', text: m })}
+        onExport={(mode) => runExport(historyWeek ?? undefined, mode)}
+        onReady={() => setHistoryLoading(false)}
       />
+      {historyLoading && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 3000,
+            background: 'rgba(255,255,255,0.72)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 14,
+          }}
+        >
+          <Spin size="large" />
+          <span style={{ color: JNJ.text, fontSize: 13 }}>
+            正在载入历史数据{historyWeek ? `（周码 ${historyWeek}）` : ''}…
+          </span>
+        </div>
+      )}
     </div>
   );
 }
 
-function StatusBar({ status, progress }: { status: Status | null; progress: Progress | null }) {
+function StatusBar({ status, progress }: { status: Status | null; progress: TaskProgress | null }) {
   const items: { label: string; value: string; tip?: string }[] = [
     { label: '临时数据', value: status?.hasStaging ? `${status.weekCode} · ${status.stagedRows.toLocaleString()} 行` : '无' },
     {
@@ -481,13 +553,27 @@ function StatusBar({ status, progress }: { status: Status | null; progress: Prog
         color: JNJ.text,
       }}
     >
-      {progress && (
-        <span style={{ color: JNJ.red, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Spin size="small" />
-          {progress.stage}
-          {progress.total > 1 ? ` ${progress.done}/${progress.total}` : ''}
-        </span>
-      )}
+      {progress &&
+        (progress.finished ? (
+          // 任务完成后留在状态栏的是绿色对勾，而不是红色转圈。
+          <span
+            style={{
+              color: JNJ.success,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 600,
+            }}
+          >
+            <CircleCheck size={14} />
+            {progressText(progress)}
+          </span>
+        ) : (
+          <span style={{ color: JNJ.red, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Spin size="small" />
+            {progressText(progress)}
+          </span>
+        ))}
       {items.map((i) => (
         <Tooltip key={i.label} title={i.tip ?? `${i.label}：${i.value}`}>
           <span>

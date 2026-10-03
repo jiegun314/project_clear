@@ -6,12 +6,22 @@ import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
 import { INDEX_BLOCK_WIDTH, INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
 import { buildWeekColumns } from './weekColumns';
-import type { GridHeader, GridRow } from '../types';
+import type { ExportResult, GridHeader, GridRow } from '../types';
 
 export interface HistoryViewProps {
   weekCode: string | null;
   onClose: () => void;
   onExported: (msg: string) => void;
+  /**
+   * 导出交给 App 统一执行：这样状态栏的进度与完成标记对历史数据窗口同样生效
+   * （这里曾经直接调 api.export，进度事件落在任务包装之外，无人认领）。
+   */
+  onExport: (mode: 'clean' | 'template') => Promise<ExportResult | null>;
+  /**
+   * 首次载入完成（拿到数据，或确认这一周没有数据）时回调一次。
+   * App 用它收起点击后立刻盖上的全屏加载遮罩。
+   */
+  onReady?: () => void;
 }
 
 /**
@@ -19,7 +29,7 @@ export interface HistoryViewProps {
  * backend, but the page size is deliberately larger than the main grid because
  * the brief asks for "all data" here.
  */
-export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps) {
+export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }: HistoryViewProps) {
   const [header, setHeader] = useState<GridHeader | null>(null);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -31,6 +41,14 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const reqId = useRef(0);
+  // 每次换一周只通知一次，避免翻页/排序时反复触发。
+  const readySent = useRef(false);
+
+  const notifyReady = useCallback(() => {
+    if (readySent.current) return;
+    readySent.current = true;
+    onReady?.();
+  }, [onReady]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
@@ -47,14 +65,20 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
       return;
     }
     let alive = true;
+    readySent.current = false;
     api
       .getGridHeader(weekCode)
       .then((h) => alive && setHeader(h))
-      .catch(() => alive && setHeader(null));
+      .catch(() => {
+        if (!alive) return;
+        setHeader(null);
+        // 没有表头就不会有后续查询，别让遮罩一直转下去。
+        notifyReady();
+      });
     return () => {
       alive = false;
     };
-  }, [weekCode]);
+  }, [weekCode, notifyReady]);
 
   const load = useCallback(async () => {
     if (!weekCode || !header) return;
@@ -74,9 +98,12 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
       setRows(res.rows ?? []);
       setTotal(res.total ?? 0);
     } finally {
-      if (id === reqId.current) setLoading(false);
+      if (id === reqId.current) {
+        setLoading(false);
+        notifyReady();
+      }
     }
-  }, [weekCode, header, page, pageSize, debounced, sort]);
+  }, [weekCode, header, page, pageSize, debounced, sort, notifyReady]);
 
   useEffect(() => {
     void load();
@@ -107,7 +134,7 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
     if (!weekCode) return;
     setExporting(true);
     try {
-      const res = await api.export(weekCode, mode);
+      const res = await onExport(mode);
       if (res) onExported(`已导出 ${res.rows} 行 × ${res.cols} 列 → ${res.destPath}`);
     } finally {
       setExporting(false);
