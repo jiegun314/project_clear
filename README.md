@@ -103,7 +103,7 @@ wails dev
 wails build -platform darwin/arm64 -clean
 
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.5.5-darwin-arm64.zip
+# 并打包成 dist/CLEAR-1.5.6-darwin-arm64.zip
 ./scripts/build-darwin.sh
 ```
 

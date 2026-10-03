@@ -89,7 +89,8 @@ export function HistoryView({ weekCode, onClose, onExported }: HistoryViewProps)
       dataIndex: ['index', i],
       key: `c${i}`,
       width: INDEX_WIDTHS[i] ?? 120,
-      fixed: i === 8 ? 'left' : undefined,
+      // 与主表一致：ITEM 与第二个 LOC 固定，横向滚动时保持可见。
+      fixed: i === 8 || i === 14 ? 'left' : undefined,
       ellipsis: true,
       render: (v: string) => <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{v === '' ? '—' : v}</span>,
     }));

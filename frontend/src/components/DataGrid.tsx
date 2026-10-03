@@ -119,7 +119,9 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
       dataIndex: ['index', i],
       key: `c${i}`,
       width: INDEX_WIDTHS[i] ?? 120,
-      fixed: i === 8 ? 'left' : undefined,
+      // ITEM（第 9 列）与第二个 LOC（第 15 列，AdjDmd / CalcOH / WOS 这些
+      // 标签）始终留在左侧，向右滚动时两者都可见。
+      fixed: i === 8 || i === 14 ? 'left' : undefined,
       ellipsis: true,
       render: (v: string, row) => {
         const text = v === '' ? '—' : v;
