@@ -251,7 +251,7 @@ func columnList(staging bool, weekCodes []string) string {
 		// column per week; it has to be selected or the grid shows blanks.
 		cols = append(cols, "weeks")
 	}
-	cols = append(cols, "style_ids", "comments", "file_name", "src_row")
+	cols = append(cols, "style_ids", "comments", "cf_colors", "file_name", "src_row")
 	return strings.Join(cols, ",")
 }
 
@@ -274,10 +274,10 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[in
 	} else {
 		scans = append(scans, &weeksJSON)
 	}
-	var styleJSON, commentsJSON sql.NullString
+	var styleJSON, commentsJSON, cfColorsJSON sql.NullString
 	var fileName sql.NullString
 	var srcRow sql.NullInt64
-	scans = append(scans, &styleJSON, &commentsJSON, &fileName, &srcRow)
+	scans = append(scans, &styleJSON, &commentsJSON, &cfColorsJSON, &fileName, &srcRow)
 	if err := rows.Scan(scans...); err != nil {
 		return gr, err
 	}
@@ -298,7 +298,7 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[in
 			gr.Weeks[i] = nullToCell(v)
 		}
 	}
-	gr.WeekMeta = buildWeekMeta(weekCodes, styleJSON.String, commentsJSON.String, colors)
+	gr.WeekMeta = buildWeekMeta(weekCodes, styleJSON.String, commentsJSON.String, cfColorsJSON.String, colors)
 	gr.FileName = fileName.String
 	gr.SrcRow = int(srcRow.Int64)
 	return gr, nil
@@ -307,7 +307,7 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[in
 // buildWeekMeta aligns the row's interned style ids and its notes with the week
 // columns. Both are stored against absolute column numbers, so the week at
 // index i corresponds to entry FirstWeekCol-1+i.
-func buildWeekMeta(weekCodes []string, styleJSON, commentsJSON string, colors map[int]string) []CellMeta {
+func buildWeekMeta(weekCodes []string, styleJSON, commentsJSON, cfColorsJSON string, colors map[int]string) []CellMeta {
 	var styleIDs []int
 	if styleJSON != "" {
 		_ = json.Unmarshal([]byte(styleJSON), &styleIDs)
@@ -316,10 +316,18 @@ func buildWeekMeta(weekCodes []string, styleJSON, commentsJSON string, colors ma
 	if commentsJSON != "" {
 		_ = json.Unmarshal([]byte(commentsJSON), &comments)
 	}
+	// 条件格式算出来的颜色优先于静态填充色：Excel 里看到的信号色（红/黄/蓝/绿）
+	// 来自条件格式，只有没有命中规则时才回落到单元格本身的底色。
+	var cfColors []string
+	if cfColorsJSON != "" {
+		_ = json.Unmarshal([]byte(cfColorsJSON), &cfColors)
+	}
 	out := make([]CellMeta, len(weekCodes))
 	for i := range weekCodes {
 		col := mps.FirstWeekCol + i
-		if col-1 < len(styleIDs) {
+		if i < len(cfColors) && cfColors[i] != "" {
+			out[i].Color = cfColors[i]
+		} else if col-1 < len(styleIDs) {
 			out[i].Color = colors[styleIDs[col-1]]
 		}
 		if c, ok := comments[col]; ok {

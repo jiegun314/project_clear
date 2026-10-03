@@ -38,6 +38,9 @@ type StagedRow struct {
 	StyleIDs  []int
 	CF        mps.CFRow
 	Comments  mps.CommentMap
+	// CFColors is the colour the conditional formats paint on each week cell,
+	// aligned to Weeks. Empty strings mean "no rule matched".
+	CFColors []string
 }
 
 // StagingInput is everything one import or add action produces.
@@ -181,7 +184,7 @@ func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, s
 	for i := 1; i <= mps.IndexCols; i++ {
 		stgCols = append(stgCols, fmt.Sprintf("c%d", i))
 	}
-	stgCols = append(stgCols, "weeks", "style_ids", "cf_id", "comments")
+	stgCols = append(stgCols, "weeks", "style_ids", "cf_id", "comments", "cf_colors")
 	ph := make([]string, len(stgCols))
 	for i := range ph {
 		ph[i] = "?"
@@ -250,6 +253,15 @@ func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, s
 			comments = string(b)
 		}
 
+		var cfColors any
+		if hasAny(r.CFColors) {
+			b, err := json.Marshal(r.CFColors)
+			if err != nil {
+				return err
+			}
+			cfColors = string(b)
+		}
+
 		var fileID any
 		if id, ok := fileIDs[r.FilePath]; ok && r.FilePath != "" {
 			fileID = id
@@ -262,7 +274,7 @@ func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, s
 		for _, v := range r.Index {
 			rowArgs = append(rowArgs, v)
 		}
-		rowArgs = append(rowArgs, string(weeksJSON), string(styleJSON), cfID, comments)
+		rowArgs = append(rowArgs, string(weeksJSON), string(styleJSON), cfID, comments, cfColors)
 		if _, err := rowStmt.Exec(rowArgs...); err != nil {
 			return err
 		}
@@ -423,6 +435,16 @@ func totalRows(files []StagedFile) int {
 		n += f.RowsTotal
 	}
 	return n
+}
+
+// hasAny reports whether at least one entry of the slice is non-empty.
+func hasAny(values []string) bool {
+	for _, v := range values {
+		if v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveStyleIDsTx(tx *sql.Tx, dict *mps.StyleDict) (map[int]int, error) {

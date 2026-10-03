@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS stg_row (
   style_ids TEXT    NOT NULL,                   -- JSON array of interned ids
   cf_id     INTEGER,
   comments  TEXT,                                -- JSON object col -> text
+  cf_colors TEXT,                                -- JSON array, aligned to weeks (条件格式算出的底色)
   PRIMARY KEY (batch_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_stg_row_batch ON stg_row(batch_id, seq);

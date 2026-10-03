@@ -78,15 +78,17 @@ func migrate(db *sql.DB) error {
 	}
 
 	for _, table := range tables {
-		has, err := hasColumn(db, table, "comments")
-		if err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN comments TEXT`, quoteIdent(table))); err != nil {
-			return err
+		for _, col := range []string{"comments", "cf_colors"} {
+			has, err := hasColumn(db, table, col)
+			if err != nil {
+				return err
+			}
+			if has {
+				continue
+			}
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s TEXT`, quoteIdent(table), col)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

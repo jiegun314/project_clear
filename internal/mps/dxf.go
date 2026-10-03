@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -61,6 +62,50 @@ func ParseDxfs(stylesXML []byte) []string {
 		out = append(out, el.raw)
 	}
 	return out
+}
+
+var (
+	dxfBGColorRe = regexp.MustCompile(`<bgColor[^>]*rgb="([0-9A-Fa-f]{6,8})"`)
+	dxfFGColorRe = regexp.MustCompile(`<fgColor[^>]*rgb="([0-9A-Fa-f]{6,8})"`)
+)
+
+// DxfFillColors maps every differential format onto the fill colour it paints,
+// as #RRGGBB. Differential formats used by these sheets put the colour in
+// <bgColor>; <fgColor> is the fallback. Formats that only change fonts or
+// borders yield "".
+func DxfFillColors(dxfs []string) map[int]string {
+	out := make(map[int]string, len(dxfs))
+	for i, dxf := range dxfs {
+		if !strings.Contains(dxf, "<fill>") {
+			continue
+		}
+		match := dxfBGColorRe.FindStringSubmatch(dxf)
+		if match == nil {
+			match = dxfFGColorRe.FindStringSubmatch(dxf)
+		}
+		if match == nil {
+			continue
+		}
+		if hex := normaliseHex(match[1]); hex != "" {
+			out[i] = hex
+		}
+	}
+	return out
+}
+
+// normaliseHex turns the 6- or 8-digit ARGB Excel writes into #RRGGBB.
+func normaliseHex(v string) string {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	switch len(v) {
+	case 6:
+		return "#" + v
+	case 8:
+		if v[:2] == "00" {
+			return ""
+		}
+		return "#" + v[2:]
+	}
+	return ""
 }
 
 // remapSourceDxfs turns each rule's file-local dxfId into a batch-wide id. A

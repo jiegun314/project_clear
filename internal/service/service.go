@@ -290,6 +290,7 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 				StyleIDs:  r.StyleIDs,
 				CF:        r.CF,
 				Comments:  r.Comments,
+				CFColors:  r.CFColors,
 			})
 		}
 		res.OK++

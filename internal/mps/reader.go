@@ -71,6 +71,10 @@ type DataRow struct {
 	StyleIDs []int `json:"styleIds"`
 	// CF is the conditional-format program captured for this row.
 	CF CFRow `json:"cf"`
+	// CFColors holds the fill colour the conditional formats paint on each
+	// week cell, aligned to Weeks. The grid shows it instead of the static
+	// fill, which is what Excel does; empty entries have no matching rule.
+	CFColors []string `json:"cfColors,omitempty"`
 	// Comments maps a column number to its comment text.
 	Comments CommentMap `json:"comments,omitempty"`
 	// SourceRow is the worksheet row the data came from.
@@ -144,11 +148,15 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 		// reject the data.
 		cfByRow = map[int]CFRow{}
 	}
-	// Each workbook numbers its own <dxf> records, so resolve them against this
-	// file and re-intern them for the batch.
+	// Each workbook numbers its own <dxf> records. Keep the file-local table
+	// (it is what the conditional formats are evaluated against) and re-intern
+	// the ids for the batch after the rows have been read.
+	var dxfColors map[int]string
+	var dxfs []string
 	if opt.Dxf != nil {
 		if styles, err := zipPart(path, "xl/styles.xml"); err == nil {
-			remapSourceDxfs(cfByRow, ParseDxfs(styles), opt.Dxf)
+			dxfs = ParseDxfs(styles)
+			dxfColors = DxfFillColors(dxfs)
 		}
 	}
 
@@ -184,8 +192,13 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 	defer vr.Close()
 
 	styleIdxCache := map[int]int{}
+	// Every row's cells, kept for the conditional-format evaluation below: the
+	// rules compare a cell with the row two below it, which a forward-only pass
+	// has not seen yet.
+	allCells := map[int][]string{}
 	err = vr.readRows(shared, FirstDataRow, 1, total, func(rowNum int, cells []string) error {
 		cells = filler.expand(cells, rowNum, total)
+		allCells[rowNum] = append([]string(nil), cells...)
 		// Blank but styled rows still exist in these workbooks; they are not
 		// data and must not inflate the reported totals.
 		hasValue := false
@@ -251,7 +264,61 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 		res.Err = fmt.Sprintf("读取数据行失败: %v", err)
 		return res, nil
 	}
+	applyCFColors(res.Rows, header, allCells, total, dxfColors, f)
+	// The stored program must reference the batch-wide dxf ids, and the rows
+	// carry their own copy of the program.
+	if opt.Dxf != nil && len(dxfs) > 0 {
+		remapSourceDxfs(cfByRow, dxfs, opt.Dxf)
+		for _, row := range res.Rows {
+			row.CF = cfByRow[row.SourceRow]
+		}
+	}
 	return res, nil
+}
+
+// applyCFColors evaluates each kept row's conditional formats so the grid can
+// show the colour Excel shows. The rules compare the cell with the row two
+// below (the SS row) and with an absolute parameter cell such as $DN$56, so the
+// lookup falls back to excelize for columns outside the read window.
+func applyCFColors(rows []*DataRow, header Header, allCells map[int][]string, total int, dxfColors map[int]string, f *excelize.File) {
+	if len(dxfColors) == 0 {
+		return
+	}
+	outside := map[[2]int]string{}
+	lookup := func(row, col int) string {
+		if col >= 1 && col <= total {
+			if cells, ok := allCells[row]; ok && col-1 < len(cells) {
+				return cells[col-1]
+			}
+			return ""
+		}
+		key := [2]int{row, col}
+		if v, ok := outside[key]; ok {
+			return v
+		}
+		v, err := f.GetCellValue(SheetName, CellRef(col, row), excelize.Options{RawCellValue: true})
+		if err != nil {
+			v = ""
+		}
+		outside[key] = v
+		return v
+	}
+	for _, row := range rows {
+		if row.CF.Empty() {
+			continue
+		}
+		colors := EvalCFColors(row.CF, row.SourceRow, dxfColors, lookup)
+		if len(colors) == 0 {
+			continue
+		}
+		week := make([]string, len(header.Weeks))
+		for i := range header.Weeks {
+			if c, ok := colors[FirstWeekCol+i]; ok {
+				week[i] = c
+			}
+		}
+		row.CFColors = week
+	}
 }
 
 func hasSheet(f *excelize.File, name string) bool {

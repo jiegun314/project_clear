@@ -112,3 +112,31 @@ func TestCommittedGridReturnsWeekValuesAndMeta(t *testing.T) {
 	}
 	assertWeekCells(t, gr.Rows)
 }
+
+// 条件格式算出来的信号色优先于单元格静态底色：CalcOH / CalcOH2 这两行在源文件
+// 里没有静态填充，颜色完全来自条件格式。
+func TestGridPrefersConditionFormatColour(t *testing.T) {
+	st := openTestStore(t)
+	in := stagedRowWithStyle(t)
+	in.Rows[0].CFColors = []string{"#00B0F0", "", "#FFFF00"}
+	if _, err := st.SaveStaging(in); err != nil {
+		t.Fatalf("save staging: %v", err)
+	}
+	gr, err := st.QueryRows(Query{Source: "", Page: 1, PageSize: 10, SortField: "seq"})
+	if err != nil {
+		t.Fatalf("query staging: %v", err)
+	}
+	if len(gr.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(gr.Rows))
+	}
+	meta := gr.Rows[0].WeekMeta
+	if meta[0].Color != "#00B0F0" {
+		t.Errorf("命中条件格式的列 = %q, want #00B0F0（应覆盖静态底色 #DCE6F2）", meta[0].Color)
+	}
+	if meta[1].Color != "" {
+		t.Errorf("未命中且无静态底色的列 = %q, want 空", meta[1].Color)
+	}
+	if meta[2].Color != "#FFFF00" {
+		t.Errorf("第三列 = %q, want #FFFF00", meta[2].Color)
+	}
+}
