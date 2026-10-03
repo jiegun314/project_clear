@@ -91,6 +91,21 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
+	// The staging table needs the same treatment: an existing database was
+	// created before cf_colors existed, and CREATE TABLE IF NOT EXISTS leaves it
+	// untouched — importing then fails with "table stg_row has no column".
+	for _, col := range []string{"comments", "cf_colors"} {
+		has, err := hasColumn(db, "stg_row", col)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE stg_row ADD COLUMN %s TEXT`, col)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

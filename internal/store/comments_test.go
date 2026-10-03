@@ -168,3 +168,47 @@ func TestOpenMigratesLegacyTablesWithoutComments(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
+
+// v1.5.4 给暂存表加了 cf_colors（条件格式求值结果）。老数据库是用旧的
+// schema 建的，CREATE TABLE IF NOT EXISTS 不会补列，导入时就会报
+// "table stg_row has no column named cf_colors" —— 这里锁住这次修复。
+func TestOpenMigratesLegacyStagingWithoutCFColors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-staging.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy: %v", err)
+	}
+	// 先建库（含 stg_row），再把 cf_colors 删掉，模拟 v1.5.3 及以前的库。
+	if _, err := legacy.Exec(schemaSQL); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	if _, err := legacy.Exec(`ALTER TABLE stg_row DROP COLUMN cf_colors`); err != nil {
+		t.Fatalf("drop column: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy: %v", err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer st.Close()
+	has, err := hasColumn(st.db, "stg_row", "cf_colors")
+	if err != nil || !has {
+		t.Fatalf("cf_colors 未补到 stg_row (has=%v err=%v)", has, err)
+	}
+	// 老库升级后必须能正常写入暂存数据。
+	in := stagedBatch(nil)
+	in.Rows[0].CFColors = []string{"#FFFF00"}
+	if _, err := st.SaveStaging(in); err != nil {
+		t.Fatalf("save staging after migration: %v", err)
+	}
+	grid, err := st.QueryRows(Query{Source: "", Page: 1, PageSize: 5, SortField: "seq"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(grid.Rows) != 1 || grid.Rows[0].WeekMeta[0].Color != "#FFFF00" {
+		t.Fatalf("条件格式颜色未随导入写入: %+v", grid.Rows)
+	}
+}
