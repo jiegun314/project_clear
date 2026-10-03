@@ -53,10 +53,12 @@ func (l *Logger) write(level Level, source, format string, args ...any) {
 	e := Entry{
 		Seq: l.next(),
 		// The log panel shows time to the second; the file keeps milliseconds.
-		Time:    time.Now().Format("15:04:05"),
-		Level:   level,
-		Source:  source,
-		Message: fmt.Sprintf(format, args...),
+		Time:   time.Now().Format("15:04:05"),
+		Level:  level,
+		Source: source,
+		// Wrapped errors arrive in English; the panel is Chinese, so the text
+		// is localised once here and both sinks show the same wording.
+		Message: localize(fmt.Sprintf(format, args...)),
 	}
 	l.mu.Lock()
 	l.entries = append(l.entries, e)

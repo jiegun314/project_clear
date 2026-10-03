@@ -356,12 +356,26 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 	}
 
 	res.DurationMS = time.Since(start).Milliseconds()
-	s.log.Success(action, "完成：成功 %d 个文件，失败 %d 个，合并 %d 行（周码 %s），耗时 %dms",
+	src := logSource(action)
+	s.log.Success(src, "完成：成功 %d 个文件，失败 %d 个，合并 %d 行（周码 %s），耗时 %d 毫秒",
 		res.OK, res.Failed, res.RowsKept, res.WeekCode, res.DurationMS)
 	if len(res.Warnings) > 0 {
-		s.log.Warn(action, "共 %d 条提示，详见日志", len(res.Warnings))
+		s.log.Warn(src, "共 %d 条提示，详见日志", len(res.Warnings))
 	}
 	return res, nil
+}
+
+// logSource turns the machine action name into the Chinese label the log window
+// shows. The result struct keeps the raw value ("import"/"add") because the
+// frontend keys its wording off it.
+func logSource(action string) string {
+	switch action {
+	case "import":
+		return "导入"
+	case "add":
+		return "添加"
+	}
+	return action
 }
 
 func weekCodes(weeks []mps.Week) []string {

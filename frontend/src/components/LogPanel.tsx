@@ -3,6 +3,7 @@ import { Segmented, Button, Tooltip, Empty } from 'antd';
 import { ScrollText, Eraser } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api, onEvent } from '../services/api';
+import { countByLevel, filterByLevel, levelTag } from '../lib/logStats';
 import type { LogEntry } from '../types';
 
 const LEVEL_COLOR: Record<string, string> = {
@@ -12,12 +13,27 @@ const LEVEL_COLOR: Record<string, string> = {
   error: JNJ.danger,
 };
 
-const LEVEL_TAG: Record<string, string> = {
-  info: '信息',
-  success: '成功',
-  warn: '警告',
-  error: '错误',
+const LEVEL_SOFT: Record<string, string> = {
+  info: JNJ.fill,
+  success: JNJ.successSoft,
+  warn: JNJ.warningSoft,
+  error: JNJ.dangerSoft,
 };
+
+// 每一栏的固定宽度：时间/类型/来源做成窄列，剩下的宽度全部给内容，
+// 这样一条日志换行时，时间仍然像行表头一样停在自己的那一列里。
+const TIME_WIDTH = 74;
+const TYPE_WIDTH = 58;
+const SOURCE_WIDTH = 74;
+
+function columnStyle(width: number): React.CSSProperties {
+  return {
+    flex: `0 0 ${width}px`,
+    padding: '3px 8px',
+    borderRight: `1px solid ${JNJ.divider}`,
+    boxSizing: 'border-box',
+  };
+}
 
 /** The lower-right module: a live feed of everything the backend reported. */
 export function LogPanel() {
@@ -46,10 +62,8 @@ export function LogPanel() {
     return off;
   }, []);
 
-  const filtered = useMemo(
-    () => (level === 'all' ? entries : entries.filter((e) => e.level === level)),
-    [entries, level],
-  );
+  const counts = useMemo(() => countByLevel(entries), [entries]);
+  const filtered = useMemo(() => filterByLevel(entries, level), [entries, level]);
 
   useEffect(() => {
     if (stick && boxRef.current) boxRef.current.scrollTop = 0;
@@ -91,11 +105,11 @@ export function LogPanel() {
           value={level}
           onChange={(v) => setLevel(v as typeof level)}
           options={[
-            { label: '全部', value: 'all' },
-            { label: '信息', value: 'info' },
-            { label: '成功', value: 'success' },
-            { label: '警告', value: 'warn' },
-            { label: '错误', value: 'error' },
+            { label: `全部 ${counts.all}`, value: 'all' },
+            { label: `信息 ${counts.info}`, value: 'info' },
+            { label: `成功 ${counts.success}`, value: 'success' },
+            { label: `警告 ${counts.warn}`, value: 'warn' },
+            { label: `错误 ${counts.error}`, value: 'error' },
           ]}
         />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -120,7 +134,14 @@ export function LogPanel() {
           const t = e.currentTarget;
           setStick(t.scrollTop < 8);
         }}
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          fontSize: 12,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        }}
       >
         {filtered.length === 0 ? (
           <div style={{ padding: 16 }}>
@@ -132,24 +153,43 @@ export function LogPanel() {
               key={`${e.seq}-${e.time}`}
               style={{
                 display: 'flex',
-                gap: 8,
-                padding: '3px 10px',
+                alignItems: 'flex-start',
                 borderBottom: `1px solid ${JNJ.divider}`,
                 color: LEVEL_COLOR[e.level] ?? JNJ.text,
               }}
             >
-              <span style={{ color: JNJ.textMuted, flex: '0 0 auto' }}>{e.time}</span>
-              <span
+              <div style={{ ...columnStyle(TIME_WIDTH), color: JNJ.textMuted, whiteSpace: 'nowrap' }}>
+                {e.time}
+              </div>
+              <div style={columnStyle(TYPE_WIDTH)}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '0 5px',
+                    borderRadius: 3,
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    fontWeight: 600,
+                    color: LEVEL_COLOR[e.level] ?? JNJ.text,
+                    background: LEVEL_SOFT[e.level] ?? JNJ.fill,
+                  }}
+                >
+                  {levelTag(e.level)}
+                </span>
+              </div>
+              <div style={{ ...columnStyle(SOURCE_WIDTH), color: JNJ.textMuted }}>{e.source}</div>
+              <div
                 style={{
-                  flex: '0 0 auto',
-                  fontWeight: 600,
-                  color: LEVEL_COLOR[e.level] ?? JNJ.text,
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '3px 10px',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                  whiteSpace: 'pre-wrap',
                 }}
               >
-                [{LEVEL_TAG[e.level] ?? e.level}]
-              </span>
-              <span style={{ color: JNJ.textMuted, flex: '0 0 auto' }}>{e.source}</span>
-              <span style={{ flex: 1, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{e.message}</span>
+                {e.message}
+              </div>
             </div>
           ))
         )}
