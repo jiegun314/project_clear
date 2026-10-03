@@ -157,6 +157,17 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 		commentsByRow = map[int]CommentMap{}
 	}
 
+	// Excel keeps a merged block's value in its top-left cell and leaves the
+	// rest empty; the planner needs to see it on every row the merge covers
+	// (MFG CLASS CODE and friends are merged across a whole item block).
+	var merges []MergeRange
+	if part, err := SheetPartPath(path, SheetName); err == nil {
+		if raw, err := zipPart(path, part); err == nil {
+			merges = ParseMergeRanges(raw)
+		}
+	}
+	filler := newMergeFiller(merges)
+
 	// Values come from a streaming pass over the sheet XML: excelize's
 	// GetRows spends most of its time on number-format resolution that the
 	// staging layer never needs.
@@ -174,6 +185,7 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 
 	styleIdxCache := map[int]int{}
 	err = vr.readRows(shared, FirstDataRow, 1, total, func(rowNum int, cells []string) error {
+		cells = filler.expand(cells, rowNum, total)
 		// Blank but styled rows still exist in these workbooks; they are not
 		// data and must not inflate the reported totals.
 		hasValue := false
