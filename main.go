@@ -34,7 +34,11 @@ func main() {
 		BackgroundColour:  &options.RGBA{R: 244, G: 244, B: 245, A: 1},
 		OnStartup:         app.startup,
 		OnDomReady:        app.domReady,
-		AssetServer:       &assetserver.Options{Assets: assets},
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+			// 内置素材（见 easteregg.go）从二进制里取，磁盘上没有对应文件。
+			Middleware: hiddenAssetsMiddleware,
+		},
 		Mac: &mac.Options{
 			// The title bar is deliberately left as the native one. A hidden
 			// inset bar makes the window stop behaving like a key window on

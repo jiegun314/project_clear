@@ -51,3 +51,10 @@ body,
 .drag-region {
   -webkit-app-region: drag;
 }
+
+/* antd v6 puts the panel padding on .ant-modal-container, which would squeeze
+   the square content area of the About window's popup below its nominal size.
+   The header carries its own padding instead. */
+.egg-modal .ant-modal-container {
+  padding: 0;
+}

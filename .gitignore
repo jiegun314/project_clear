@@ -8,8 +8,14 @@ dist/
 frontend/.npm-cache/
 tools/spike/
 
-# 真实业务数据（含供应商/工厂/SKU/周需求），仅本地测试用，不入库
-raw_data/
+# 真实业务数据（含供应商/工厂/SKU/周需求），仅本地测试用，不入库。
+# 例外：下面两个素材会被 //go:embed 编进二进制，必须跟着仓库走，
+# 否则全新克隆时 go build 会因为找不到文件而失败。
+raw_data/*
+!raw_data/resource/
+raw_data/resource/*
+!raw_data/resource/easter_egg.png
+!raw_data/resource/Small-dog-barking-sound-effect.mp3
 
 # 运行期状态（参数与数据库），随程序目录生成
 config/
