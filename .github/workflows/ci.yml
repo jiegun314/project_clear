@@ -34,7 +34,9 @@ jobs:
       # real contents are build output. A real `wails build` compiles the frontend
       # first; these steps only type-check and test, so a placeholder is enough.
       - name: provide the embed target
-        run: mkdir -p frontend/dist && : > frontend/dist/index.html
+        # `touch` rather than a shell redirection: a `: ` inside an unquoted YAML
+        # scalar is read as a mapping and makes the whole workflow invalid.
+        run: mkdir -p frontend/dist && touch frontend/dist/index.html
 
       # CGO_ENABLED=0 keeps this job free of system packages: the only cgo user is
       # Wails' Linux window backend, and none of the packages under test touch it.
