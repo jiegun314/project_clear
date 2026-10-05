@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DataGrid } from './DataGrid';
 import type { GridHeader, GridResult, GridRow } from '../types';
 
@@ -129,5 +129,27 @@ describe('DataGrid', () => {
 
     expect(screen.queryByText('OLDER')).toBeNull();
     expect(screen.getAllByText('NEWER').length).toBeGreaterThan(0);
+  });
+  it('returns to the first page and re-queries when the page size changes', async () => {
+    // The kernel owns the page size now, so this covers the wiring: the footer's
+    // size changer must reach it, and a bigger page must not leave the user on
+    // page 3 of a list that no longer has one.
+    mocked.getGridHeader.mockResolvedValue(header('2639', '2639'));
+    mocked.queryData.mockResolvedValue({ ...result([row(1, 'ITEM-0001')]), total: 900 });
+
+    renderGrid('2639');
+    await screen.findAllByText('ITEM-0001');
+
+    fireEvent.click(await screen.findByTitle('2'));
+    await waitFor(() =>
+      expect(mocked.queryData).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 200 })),
+    );
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    fireEvent.click(await screen.findByText('500 / page'));
+
+    await waitFor(() =>
+      expect(mocked.queryData).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 500 })),
+    );
   });
 });

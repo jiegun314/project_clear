@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HistoryView } from './HistoryView';
 import type { GridHeader, GridResult, GridRow } from '../types';
 
@@ -78,7 +78,7 @@ describe('HistoryView', () => {
     expect(await screen.findByText('该周暂无数据')).toBeTruthy();
   });
 
-  it('signals readiness once per week, so the parent can drop its cover', async () => {
+  it('signals readiness once per week, and not again when the same week is re-read', async () => {
     mocked.getGridHeader.mockResolvedValue(header);
     mocked.queryData.mockResolvedValue(result([row(1, 'ITEM-0001')]));
     const onReady = vi.fn();
@@ -98,7 +98,36 @@ describe('HistoryView', () => {
       />,
     );
     await new Promise((r) => setTimeout(r, 20));
+    expect(onReady).toHaveBeenCalledTimes(1);
+
+    // Nor may a second read of the same week: flipping through pages or typing in
+    // the search box re-queries, and the cover would come back every time.
+    fireEvent.change(screen.getByPlaceholderText('搜索索引列'), { target: { value: 'ITEM' } });
+    await waitFor(() => expect(mocked.queryData).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps showing the rows it has when a later read fails', async () => {
+    // The archive window deliberately differs from the main grid here: the grid
+    // clears its rows on a failed read, this window keeps them. The behaviour is
+    // preserved by an option on the shared table kernel, and pinned here so the
+    // option cannot be dropped as "unused".
+    mocked.getGridHeader.mockResolvedValue(header);
+    mocked.queryData.mockResolvedValueOnce(result([row(1, 'ITEM-0001')]));
+
+    renderHistory('2639');
+    expect((await screen.findAllByText('ITEM-0001')).length).toBeGreaterThan(0);
+
+    mocked.queryData.mockRejectedValue(new Error('backend unavailable'));
+    fireEvent.change(screen.getByPlaceholderText('搜索索引列'), { target: { value: 'ITEM' } });
+
+    // Past the search debounce, so the failing read has certainly happened.
+    await waitFor(() => expect(mocked.queryData).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(screen.queryByText('该周暂无数据')).toBeNull();
+    expect(screen.getAllByText('ITEM-0001').length).toBeGreaterThan(0);
   });
 });

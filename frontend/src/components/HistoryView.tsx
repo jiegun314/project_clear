@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Table, Input, Button, Space, Tag, Empty, Tooltip, Select } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import { useState } from 'react';
+import { Modal, Input, Button, Space, Tag, Tooltip, Select } from 'antd';
 import { Search, FileDown, RefreshCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
-import { api } from '../services/api';
-import { INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
-import { formatIndexCell } from '../lib/format';
-import { indexSortKey } from '../lib/sortKeys';
-import { buildWeekColumns } from './weekColumns';
-import type { ExportResult, GridHeader, GridRow } from '../types';
+import { useTableQuery } from '../hooks/useTableQuery';
+import { buildGridColumns } from '../lib/gridColumns';
+import { GridTable } from './GridTable';
+import type { ExportResult } from '../types';
 
 export interface HistoryViewProps {
   weekCode: string | null;
@@ -32,112 +29,22 @@ export interface HistoryViewProps {
  * the brief asks for "all data" here.
  */
 export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }: HistoryViewProps) {
-  const [header, setHeader] = useState<GridHeader | null>(null);
-  const [rows, setRows] = useState<GridRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(500);
-  const [search, setSearch] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [sort, setSort] = useState<{ field: string; desc: boolean }>({ field: 'seq', desc: false });
-  const [loading, setLoading] = useState(false);
+  const q = useTableQuery({
+    source: weekCode,
+    defaultPageSize: 500,
+    // 失败时保留原有行：这是这个窗口一直以来的行为。
+    clearRowsOnError: false,
+    onSettled: onReady,
+  });
   const [exporting, setExporting] = useState(false);
-  const reqId = useRef(0);
-  // 每次换一周只通知一次，避免翻页/排序时反复触发。
-  const readySent = useRef(false);
-  // 父组件多数时候传的是行内箭头函数，每次渲染都是新身份。把它直接写进依赖数组，
-  // 会让表头请求和分页查询跟着父组件的**任何**状态变化（进度事件、提示消息…）
-  // 重新发一遍，所以这里只保存最新的回调，依赖保持稳定。
-  const onReadyRef = useRef(onReady);
-  useEffect(() => {
-    onReadyRef.current = onReady;
-  }, [onReady]);
 
-  const notifyReady = useCallback(() => {
-    if (readySent.current) return;
-    readySent.current = true;
-    onReadyRef.current?.();
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 250);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [weekCode, debounced, sort.field, sort.desc, pageSize]);
-
-  useEffect(() => {
-    if (!weekCode) {
-      setHeader(null);
-      return;
-    }
-    let alive = true;
-    readySent.current = false;
-    api
-      .getGridHeader(weekCode)
-      .then((h) => alive && setHeader(h))
-      .catch(() => {
-        if (!alive) return;
-        setHeader(null);
-        // 没有表头就不会有后续查询，别让遮罩一直转下去。
-        notifyReady();
-      });
-    return () => {
-      alive = false;
-    };
-  }, [weekCode, notifyReady]);
-
-  const load = useCallback(async () => {
-    if (!weekCode || !header) return;
-    const id = ++reqId.current;
-    setLoading(true);
-    try {
-      const res = await api.queryData({
-        source: weekCode,
-        page,
-        pageSize,
-        search: debounced,
-        sortField: sort.field,
-        sortDesc: sort.desc,
-        filters: {},
-      });
-      if (id !== reqId.current) return;
-      setRows(res.rows ?? []);
-      setTotal(res.total ?? 0);
-    } finally {
-      if (id === reqId.current) {
-        setLoading(false);
-        notifyReady();
-      }
-    }
-  }, [weekCode, header, page, pageSize, debounced, sort, notifyReady]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const columns = useMemo<ColumnsType<GridRow>>(() => {
-    const names: string[] = header?.indexNames ?? [];
-    const base: ColumnsType<GridRow> = names.map((name, i) => ({
-      title: <Tooltip title={`固定索引 第 ${i + 1} 列`}><span>{name || `列${i + 1}`}</span></Tooltip>,
-      dataIndex: ['index', i],
-      key: indexSortKey(i),
-      width: INDEX_WIDTHS[i] ?? 120,
-      // 与主表一致：ITEM 与第二个 LOC 固定，横向滚动时保持可见。
-      fixed: i === 8 || i === 14 ? 'left' : undefined,
-      ellipsis: true,
-      render: (v: string) => <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{formatIndexCell(i, v)}</span>,
-    }));
-    const weekCols = buildWeekColumns(header?.weeks ?? [], 'twoRow');
-    return [...base, ...weekCols].map((c) => ({
-      ...c,
-      sorter: true,
-      sortOrder: sort.field === String(c.key) ? (sort.desc ? ('descend' as const) : ('ascend' as const)) : null,
-    })) as ColumnsType<GridRow>;
-  }, [header, sort]);
-  const tableWidth = gridTableWidth(columns.length, header?.weeks?.length ?? 0);
+  const { columns, tableWidth } = buildGridColumns({
+    header: q.header,
+    // 历史窗口始终按两行表头显示。
+    headerDisplay: 'twoRow',
+    sort: q.sort,
+    indexTitle: (n) => `固定索引 第 ${n} 列`,
+  });
 
   const doExport = async (mode: 'clean' | 'template') => {
     if (!weekCode) return;
@@ -159,16 +66,16 @@ export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }
       title={
         <Space>
           <span style={{ fontWeight: 600 }}>历史数据</span>
-          {header?.weekCode && (
+          {q.header?.weekCode && (
             <>
               <Tag style={{ background: JNJ.red, color: '#fff', border: 'none' }}>
-                {header.weekCode}
+                {q.header.weekCode}
               </Tag>
-              <span style={{ color: JNJ.text, fontWeight: 400, fontSize: 13 }}>{header.weekStart}</span>
+              <span style={{ color: JNJ.text, fontWeight: 400, fontSize: 13 }}>{q.header.weekStart}</span>
             </>
           )}
           <span style={{ color: JNJ.textMuted, fontWeight: 400, fontSize: 12 }}>
-            共 {total.toLocaleString()} 行
+            共 {q.total.toLocaleString()} 行
           </span>
         </Space>
       }
@@ -178,13 +85,13 @@ export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }
             <span style={{ fontSize: 12, color: JNJ.textMuted }}>每页</span>
             <Select
               size="small"
-              value={pageSize}
-              onChange={setPageSize}
+              value={q.pageSize}
+              onChange={q.changePageSize}
               style={{ width: 90 }}
               options={[200, 500, 1000, 2000, 5000].map((n) => ({ label: `${n} 行`, value: n }))}
             />
             <Tooltip title="重新读取">
-              <a onClick={() => void load()} style={{ color: JNJ.text }}>
+              <a onClick={q.reload} style={{ color: JNJ.text }}>
                 <RefreshCw size={14} />
               </a>
             </Tooltip>
@@ -206,37 +113,28 @@ export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <Input
           allowClear
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={q.search}
+          onChange={(e) => q.setSearch(e.target.value)}
           prefix={<Search size={14} style={{ color: JNJ.textMuted }} />}
           placeholder="搜索索引列"
           style={{ width: 320 }}
         />
       </div>
-      <Table<GridRow>
-        size="small"
-        bordered
-        sticky
-        tableLayout="fixed"
-        rowKey="seq"
-        loading={loading}
+      <GridTable
+        rows={q.rows}
         columns={columns}
-        dataSource={rows}
-        scroll={{ x: tableWidth, y: 'calc(100vh - 340px)' }}
-        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该周暂无数据" /> }}
+        loading={q.loading}
+        emptyText="该周暂无数据"
+        scrollX={tableWidth}
+        scrollY="calc(100vh - 340px)"
         pagination={{
-          current: page,
-          pageSize,
-          total,
+          current: q.page,
+          pageSize: q.pageSize,
+          total: q.total,
           showSizeChanger: false,
           showTotal: (t, r) => `第 ${r[0]}-${r[1]} 条 / 共 ${t.toLocaleString()} 条`,
         }}
-        onChange={(pagination, _f, sorter) => {
-          const s = Array.isArray(sorter) ? sorter[0] : sorter;
-          const key = String(s?.columnKey ?? '');
-          setSort(key && s?.order ? { field: key, desc: s.order === 'descend' } : { field: 'seq', desc: false });
-          setPage(pagination.current ?? 1);
-        }}
+        onChange={q.onTableChange}
       />
     </Modal>
   );

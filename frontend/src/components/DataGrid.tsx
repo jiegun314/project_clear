@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Table, Input, Pagination, Space, Tag, Tooltip, Empty } from 'antd';
-import type { ColumnsType, TableProps } from 'antd/es/table';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { Input, Pagination, Space, Tag, Tooltip } from 'antd';
 import { Search, RotateCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
-import { api } from '../services/api';
-import { INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
-import { formatIndexCell } from '../lib/format';
-import { indexSortKey } from '../lib/sortKeys';
-import { buildWeekColumns } from './weekColumns';
-import type { GridHeader, GridRow } from '../types';
+import { useTableQuery } from '../hooks/useTableQuery';
+import { buildGridColumns } from '../lib/gridColumns';
+import { GridTable } from './GridTable';
 
 export interface DataGridProps {
   /** "" shows the staging area; a week code shows that committed week. */
@@ -20,19 +16,14 @@ export interface DataGridProps {
 }
 
 export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataGridProps) {
-  const [header, setHeader] = useState<GridHeader | null>(null);
-  const [rows, setRows] = useState<GridRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [sort, setSort] = useState<{ field: string; desc: boolean }>({ field: 'seq', desc: false });
-  const [loading, setLoading] = useState(false);
-  // The page size starts from the configured default but the footer's size
-  // selector owns it from then on.
-  const [size, setSize] = useState(pageSize);
-  useEffect(() => setSize(pageSize), [pageSize]);
-  const reqId = useRef(0);
+  const q = useTableQuery({
+    source,
+    defaultPageSize: pageSize,
+    reloadToken,
+    // Leaving the previous week's rows under a new week's header would be a lie.
+    clearRowsOnError: true,
+  });
+
   // The table body follows the space the splitter gives it. antd wants a
   // number, so the wrapper and its separate sticky header are measured.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -52,121 +43,16 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
     const header = el.querySelector('.ant-table-header');
     if (header) observer.observe(header);
     return () => observer.disconnect();
-  }, [header]);
+  }, [q.header]);
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 250);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [source, debounced, sort.field, sort.desc, reloadToken]);
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .getGridHeader(source)
-      .then((h) => {
-        if (alive) setHeader(h);
-      })
-      .catch(() => {
-        if (alive) setHeader(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [source, reloadToken]);
-
-  const load = useCallback(async () => {
-    if (!header) return;
-    const id = ++reqId.current;
-    setLoading(true);
-    try {
-      const res = await api.queryData({
-        source,
-        page,
-        pageSize: size,
-        search: debounced,
-        sortField: sort.field,
-        sortDesc: sort.desc,
-        filters: {},
-      });
-      // A slower earlier request must not overwrite a newer one.
-      if (id !== reqId.current) return;
-      setRows(res.rows ?? []);
-      setTotal(res.total ?? 0);
-    } catch {
-      if (id === reqId.current) {
-        setRows([]);
-        setTotal(0);
-      }
-    } finally {
-      if (id === reqId.current) setLoading(false);
-    }
-  }, [header, source, page, size, debounced, sort]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const indexCols = useMemo<ColumnsType<GridRow>>(() => {
-    const names: string[] = header?.indexNames ?? [];
-    return names.map((name, i) => ({
-      title: (
-        <Tooltip title={`第 ${i + 1} 列 · 固定索引`}>
-          <span>{name || `列${i + 1}`}</span>
-        </Tooltip>
-      ),
-      dataIndex: ['index', i],
-      key: indexSortKey(i),
-      width: INDEX_WIDTHS[i] ?? 120,
-      // ITEM（第 9 列）与第二个 LOC（第 15 列，AdjDmd / CalcOH / WOS 这些
-      // 标签）始终留在左侧，向右滚动时两者都可见。
-      fixed: i === 8 || i === 14 ? 'left' : undefined,
-      ellipsis: true,
-      render: (v: string, row) => (
-        <Tooltip title={row.fileName ? `${row.fileName} · 源第 ${row.srcRow} 行` : undefined}>
-          <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{formatIndexCell(i, v)}</span>
-        </Tooltip>
-      ),
-    }));
-  }, [header]);
-
-  const weekCols = useMemo<ColumnsType<GridRow>>(() => {
-    // Go marshals a nil slice as null, so the array is never assumed here.
-    return buildWeekColumns(header?.weeks ?? [], headerDisplay);
-  }, [header, headerDisplay]);
-
-  const allColumns = [...indexCols, ...weekCols];
-  // An explicit pixel width keeps the header table and the body table on the
-  // same grid; `max-content` let each of them solve the layout on its own.
-  // Before anything is imported there are no columns at all, and forcing the
-  // pixel width would paint a meaningless horizontal scrollbar under the empty
-  // placeholder.
-  const tableWidth = gridTableWidth(allColumns.length, header?.weeks?.length ?? 0);
-
-  // Sorting is a backend concern: the columns only declare that they are
-  // sortable and report the intent, and the order flag is echoed back so the
-  // header shows the current direction.
-  const columns = allColumns.map((c) => {
-    const key = String(c.key);
-    return {
-      ...c,
-      sorter: true,
-      sortOrder: sort.field === key ? (sort.desc ? ('descend' as const) : ('ascend' as const)) : null,
-    };
-  }) as ColumnsType<GridRow>;
-
-  const onTableChange: TableProps<GridRow>['onChange'] = (_pagination, _filters, sorter) => {
-    const s = Array.isArray(sorter) ? sorter[0] : sorter;
-    const key = String(s?.columnKey ?? '');
-    if (s?.order && key) {
-      setSort({ field: key, desc: s.order === 'descend' });
-    } else {
-      setSort({ field: 'seq', desc: false });
-    }
-  };
+  const { columns, tableWidth } = buildGridColumns({
+    header: q.header,
+    headerDisplay,
+    sort: q.sort,
+    indexTitle: (n) => `第 ${n} 列 · 固定索引`,
+    // Where a row came from, so a value can be traced back to its workbook.
+    cellTitle: (row) => (row.fileName ? `${row.fileName} · 源第 ${row.srcRow} 行` : undefined),
+  });
 
   const title = source === '' ? '整合数据（临时）' : `整合数据（周码 ${source}）`;
 
@@ -186,7 +72,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
         }}
       >
         <span>{title}</span>
-        {header?.weekCode && (
+        {q.header?.weekCode && (
           <Tag
             style={{
               background: 'rgba(255,255,255,0.22)',
@@ -196,11 +82,11 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {header.weekCode} · {header.weekStart}
+            {q.header.weekCode} · {q.header.weekStart}
           </Tag>
         )}
         <span style={{ marginLeft: 'auto', fontWeight: 400, opacity: 0.92, fontSize: 12 }}>
-          共 {total.toLocaleString()} 行 · {header?.weeks?.length ?? 0} 个周列
+          共 {q.total.toLocaleString()} 行 · {q.header?.weeks?.length ?? 0} 个周列
         </span>
       </div>
 
@@ -216,16 +102,16 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
       >
         <Input
           allowClear
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={q.search}
+          onChange={(e) => q.setSearch(e.target.value)}
           prefix={<Search size={14} style={{ color: JNJ.textMuted }} />}
           placeholder="搜索 P1..P5 / 物料 / 描述 / 目录 ..."
           style={{ width: 300 }}
         />
         <Space style={{ marginLeft: 'auto' }}>
           <Tooltip title="刷新">
-            <a onClick={() => void load()} style={{ color: JNJ.text }}>
-              <RotateCw size={15} className={loading ? 'spin' : undefined} />
+            <a onClick={q.reload} style={{ color: JNJ.text }}>
+              <RotateCw size={15} className={q.loading ? 'spin' : undefined} />
             </a>
           </Tooltip>
         </Space>
@@ -234,28 +120,14 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
       {/* One scrollbar only: the table body scrolls inside this box, while the
           pagination sits below it and never scrolls out of view. */}
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: JNJ.surface }}>
-        <Table<GridRow>
-          size="small"
-          bordered
-          sticky
-          tableLayout="fixed"
-          rowKey="seq"
-          loading={loading}
+        <GridTable
+          rows={q.rows}
           columns={columns}
-          dataSource={rows}
-          pagination={false}
-          scroll={{ x: tableWidth, y: bodyHeight > 0 ? bodyHeight : 'calc(100vh - 520px)' }}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  source === '' ? '暂无临时数据，请使用工具栏的导入或添加' : '该周暂无数据'
-                }
-              />
-            ),
-          }}
-          onChange={(pagination, filters, sorter, extra) => onTableChange(pagination, filters, sorter, extra)}
+          loading={q.loading}
+          emptyText={source === '' ? '暂无临时数据，请使用工具栏的导入或添加' : '该周暂无数据'}
+          scrollX={tableWidth}
+          scrollY={bodyHeight > 0 ? bodyHeight : 'calc(100vh - 520px)'}
+          onChange={q.onTableChange}
         />
       </div>
 
@@ -272,15 +144,15 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
       >
         <Pagination
           size="small"
-          current={page}
-          pageSize={size}
-          total={total}
+          current={q.page}
+          pageSize={q.pageSize}
+          total={q.total}
           showSizeChanger
           pageSizeOptions={[50, 100, 200, 500, 1000]}
           showTotal={(t, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${t.toLocaleString()} 条`}
           onChange={(nextPage, nextSize) => {
-            if (nextSize !== size) setSize(nextSize);
-            setPage(nextSize !== size ? 1 : nextPage);
+            if (nextSize !== q.pageSize) q.changePageSize(nextSize);
+            else q.setPage(nextPage);
           }}
         />
       </div>
