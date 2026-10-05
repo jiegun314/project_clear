@@ -1,3 +1,24 @@
+// Package main is the Wails binding layer. The exported methods on App are the
+// surface the frontend calls: they convert arguments, delegate to
+// internal/service and shape the result into internal/view. Keeping them that
+// thin is what lets the business logic be tested without a webview, and it is
+// also why Wails appears in this package and nowhere else.
+//
+// The files are split by what the frontend asks for, so a change to one screen
+// touches one file:
+//
+//	app.go          the App object, startup and shutdown, error recovery
+//	app_status.go   the status bar and the About window
+//	app_staging.go  导入 / 添加 / 整合 / 清空
+//	app_data.go     the data grid reads
+//	app_export.go   导出, and revealing the result in Finder
+//	app_settings.go 参数设定
+//	app_logs.go     the log stream and its queries
+//	app_dirs.go     remembering the folder last used in a dialog
+//
+// Behaviour that belongs to the application rather than to the screen that
+// reaches it — the merge itself, the database, the export engines — lives in
+// internal/service and below.
 package main
 
 import (
@@ -6,18 +27,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
 	"project_clear/internal/config"
 	"project_clear/internal/logging"
-	"project_clear/internal/mps"
 	"project_clear/internal/service"
 	"project_clear/internal/store"
-	"project_clear/internal/view"
 
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -26,7 +43,7 @@ import (
 const (
 	AppName    = "CLEAR"
 	AppFull    = "Consolidation & Loading of Enterprise Analytics for Replenishment"
-	AppVersion = "1.6.0"
+	AppVersion = "1.6.1"
 )
 
 // App is the object whose exported methods are bound to the frontend.
@@ -134,22 +151,6 @@ func (a *App) boot() error {
 	return nil
 }
 
-func (a *App) streamLogs(ctx context.Context) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ch, cancel := a.log.Subscribe()
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case e := <-ch:
-			wr.EventsEmit(a.ctx, "log:entry", e)
-		}
-	}
-}
-
 // shutdown stops the log stream and releases the database once any operation in
 // progress has finished. Wails calls it from OnShutdown, and Quit calls it
 // before asking the window to close, so it has to be safe to run twice and in
@@ -229,480 +230,6 @@ func (a *App) recoverFault(where string, err *error) {
 	if err != nil {
 		*err = errors.New(msg)
 	}
-}
-
-// ---------------------------------------------------------------- app info
-
-// lastDir is where the chooser should open; the last folder used is the most
-// useful default for a weekly batch job.
-func (a *App) lastDir() string {
-	c := a.cfg.Get()
-	if c.ExportDir != "" {
-		return c.ExportDir
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, "Documents")
-	}
-	return ""
-}
-
-func (a *App) rememberDir(dir string) {
-	if dir == "" {
-		return
-	}
-	c := a.cfg.Get()
-	if c.ExportDir == dir {
-		return
-	}
-	c.ExportDir = dir
-	if _, err := a.cfg.Save(c); err != nil {
-		a.log.Warn("参数", "保存目录失败: %v", err)
-	}
-}
-
-// GetAppInfo returns the About-window payload.
-func (a *App) GetAppInfo() view.AppInfo {
-	defer a.recoverFault("GetAppInfo", nil)
-	info := view.AppInfo{
-		Name: AppName, FullName: AppFull, Version: AppVersion,
-		GoVersion: runtime.Version(), Platform: runtime.GOOS + "/" + runtime.GOARCH,
-	}
-	if a.cfg != nil {
-		info.ConfigPath = a.cfg.Path()
-	}
-	if a.data != "" {
-		info.DataDir = a.data
-		info.Database = filepath.Join(a.data, "clear.db")
-	}
-	return info
-}
-
-// ---------------------------------------------------------------- status
-
-// GetStatus returns the current state for the status bar.
-func (a *App) GetStatus() (out *view.Status, err error) {
-	defer a.recoverFault("GetStatus", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	c := a.cfg.Get()
-	st := &view.Status{
-		ReadColumns: c.ReadColumns, LOCFilter: c.LOCFilter, PageSize: c.PageSize,
-		HeaderDisplay: string(c.HeaderDisplay), ExportMode: string(c.ExportMode),
-		Database: filepath.Join(a.data, "clear.db"),
-	}
-	sum, err := a.svc.StagingSummary()
-	if err != nil {
-		return nil, err
-	}
-	if sum.HasStaging {
-		st.HasStaging = true
-		st.WeekCode = sum.WeekCode
-		st.WeekStart = sum.WeekStart
-		st.StagedRows = sum.RowKept
-	}
-	list, err := a.svc.Archive()
-	if err != nil {
-		return nil, err
-	}
-	st.ArchivedWeeks = len(list)
-	for _, e := range list {
-		st.ArchivedRows += e.RowCount
-	}
-	if len(a.log.Recent(1)) > 0 {
-		last := a.log.Recent(1)[0]
-		st.LastAction = fmt.Sprintf("%s %s", last.Time, last.Message)
-	}
-	return st, nil
-}
-
-// ---------------------------------------------------------------- import
-
-// ImportFolder asks for a folder and imports every workbook inside it.
-func (a *App) ImportFolder() (out *service.ImportResult, err error) {
-	defer a.recoverFault("ImportFolder", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	picked, err := selectPaths("选择包含 MPS 源文件的文件夹", a.lastDir(), false, false, nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(picked) == 0 {
-		return nil, nil // cancelled
-	}
-	dir := picked[0]
-	a.rememberDir(dir)
-	res, err := a.svc.ImportFolder(dir, a.progress)
-	if err != nil {
-		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
-		return nil, err
-	}
-	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
-	return res, nil
-}
-
-// AddFiles asks for one or more workbooks and stages them.
-func (a *App) AddFiles() (out *service.ImportResult, err error) {
-	defer a.recoverFault("AddFiles", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	paths, err := selectPaths("选择 MPS 源文件（可多选）", a.lastDir(), true, true,
-		[]string{"xlsm", "xlsx"})
-	if err != nil {
-		return nil, err
-	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	if len(paths) == 1 {
-		a.rememberDir(filepath.Dir(paths[0]))
-	}
-	res, err := a.svc.AddFiles(paths, a.progress, false)
-	if err != nil {
-		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
-		return nil, err
-	}
-	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
-	return res, nil
-}
-
-// ConfirmAddFiles retries a 添加 after the user accepted that the listed files
-// are already in the integration list. Their old rows are replaced by the
-// freshly read ones; every other file keeps its data.
-func (a *App) ConfirmAddFiles(paths []string) (out *service.ImportResult, err error) {
-	defer a.recoverFault("ConfirmAddFiles", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	res, err := a.svc.AddFiles(paths, a.progress, true)
-	if err != nil {
-		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
-		return nil, err
-	}
-	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
-	return res, nil
-}
-
-// ---------------------------------------------------------------- commit
-
-// Commit promotes the staged data into its permanent weekly table.
-func (a *App) Commit() (out *view.CommitResult, err error) {
-	defer a.recoverFault("Commit", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	entry, overwrote, err := a.svc.Commit()
-	if err != nil {
-		return nil, err
-	}
-	return &view.CommitResult{
-		WeekCode: entry.WeekCode, WeekStart: entry.WeekStart, TableName: entry.TableName,
-		RowCount: entry.RowCount, FileCount: entry.FileCount, CommittedAt: entry.CommittedAt,
-		Overwrote: overwrote,
-	}, nil
-}
-
-// ------------------------------------------------------- staging file list
-
-// GetStagingFiles lists the work set behind the toolbar's 已导入文件 button: the
-// files that were imported (or added), and — after 整合 — the same list as the
-// record of that import. It stays until 清空 or the next import.
-func (a *App) GetStagingFiles() (out *view.StagingFilesView, err error) {
-	defer a.recoverFault("GetStagingFiles", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	out = view.NewStagingFilesView()
-	files, _, state, err := a.svc.BatchFiles()
-	if err != nil {
-		return nil, err
-	}
-	if len(files) == 0 {
-		return out, nil
-	}
-	out.HasStaging = state == "staging"
-	out.BatchState = state
-	out.Files = files
-	for _, f := range files {
-		if f.Status == "ok" {
-			out.FileCount++
-			out.RowCount += f.RowsKept
-		} else {
-			out.Failed++
-		}
-	}
-	return out, nil
-}
-
-// ---------------------------------------------------------------- clear
-
-// ClearStaging drops every imported-but-unsaved row: the staging area and the
-// export template that came with it. Weeks already integrated are untouched.
-func (a *App) ClearStaging() (out *view.ClearStagingResult, err error) {
-	defer a.recoverFault("ClearStaging", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	sum, err := a.svc.StagingSummary()
-	if err != nil {
-		return nil, err
-	}
-	// 清空 always runs: with no staging left it only ends the 已导入文件 list
-	// (the record of the batch that was just integrated).
-	rows, err := a.svc.ClearStaging()
-	if err != nil {
-		return nil, err
-	}
-	return &view.ClearStagingResult{WeekCode: sum.WeekCode, Rows: rows}, nil
-}
-
-// ---------------------------------------------------------------- export
-
-// Export asks where to save the data and writes it. An empty mode uses the
-// configured default (纯数据); "clean" and "template" force one engine.
-func (a *App) Export(weekCode string, mode string) (out *view.ExportResult, err error) {
-	defer a.recoverFault("Export", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	c := a.cfg.Get()
-	effective := config.ExportMode(mode)
-	if effective == "" {
-		effective = c.ExportMode
-	}
-	ext := ".xlsm"
-	if effective == config.ExportClean {
-		ext = ".xlsx"
-	}
-	// The save dialog needs a name before the export runs; with no week named
-	// this is whatever the main grid is showing.
-	target := a.svc.ExportWeek(weekCode)
-	if target == "" {
-		return nil, fmt.Errorf("没有可导出的数据，请先导入文件")
-	}
-	dir := c.ExportDir
-	if dir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, "Documents")
-		}
-	}
-	dest, err := selectSavePath("导出整合数据", fmt.Sprintf("CLEAR_%s%s", target, ext), dir,
-		[]string{strings.TrimPrefix(ext, ".")})
-	if err != nil {
-		return nil, err
-	}
-	if dest == "" {
-		return nil, nil
-	}
-	a.rememberDir(filepath.Dir(dest))
-	if !strings.EqualFold(filepath.Ext(dest), ext) {
-		dest = strings.TrimSuffix(dest, filepath.Ext(dest)) + ext
-	}
-	res, err := a.svc.Export(service.ExportOptions{WeekCode: weekCode, DestPath: dest, Mode: effective}, a.progress)
-	if err != nil {
-		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
-		return nil, err
-	}
-	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
-	return &view.ExportResult{
-		DestPath: dest, Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
-		Comments: res.Comments, CFRows: res.CFRows, StylesUsed: res.StylesUsed,
-		Dropped: res.CFRulesDropped, SizeBytes: res.SizeBytes,
-		PreservedVBA: res.PreservedVBA, DurationMS: res.DurationMS,
-	}, nil
-}
-
-// RevealExport opens the folder containing an exported file.
-func (a *App) RevealExport(path string) {
-	defer a.recoverFault("RevealExport", nil)
-	if path == "" {
-		return
-	}
-	wr.BrowserOpenURL(a.ctx, "file://"+filepath.Dir(path))
-}
-
-// ---------------------------------------------------------------- data
-
-// QueryData returns one page of the merged data.
-func (a *App) QueryData(q view.GridQuery) (out *store.GridResult, err error) {
-	defer a.recoverFault("QueryData", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	c := a.cfg.Get()
-	if q.PageSize <= 0 {
-		q.PageSize = c.PageSize
-	}
-	return a.svc.Query(store.Query{
-		Source: q.Source, Page: q.Page, PageSize: q.PageSize,
-		Search: q.Search, SortField: q.SortField, SortDesc: q.SortDesc, Filters: q.Filters,
-	})
-}
-
-// GetGridHeader returns the column layout for a source.
-func (a *App) GetGridHeader(source string) (out *view.GridHeader, err error) {
-	defer a.recoverFault("GetGridHeader", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	out = view.NewGridHeader(source)
-	// The week-code check stays here so a crafted request is rejected before it
-	// reaches the store; resolving the source itself belongs to the service.
-	if source != "" && !store.ValidWeekCode(source) {
-		return nil, fmt.Errorf("非法周码 %q", source)
-	}
-	src, err := a.svc.GridSource(source)
-	if err != nil {
-		return nil, err
-	}
-	out.HasStaging = src.HasStaging
-	out.WeekCode = src.WeekCode
-	out.WeekStart = src.WeekStart
-	if src.IndexNames != nil {
-		out.IndexNames = src.IndexNames
-	}
-	for _, c := range src.WeekCodes {
-		w, err := mps.ParseWeekCode(c)
-		if err != nil {
-			return nil, err
-		}
-		out.Weeks = append(out.Weeks, w)
-	}
-	return out, nil
-}
-
-// GetArchive lists committed weeks.
-func (a *App) GetArchive() (out []store.ArchiveEntry, err error) {
-	defer a.recoverFault("GetArchive", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	return a.svc.Archive()
-}
-
-// GetYears lists the years that have committed weeks.
-func (a *App) GetYears() (out []int, err error) {
-	defer a.recoverFault("GetYears", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	return a.svc.Years()
-}
-
-// GetWeeks lists committed week numbers for a year.
-func (a *App) GetWeeks(year int) (out []int, err error) {
-	defer a.recoverFault("GetWeeks", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	return a.svc.Weeks(year)
-}
-
-// ---------------------------------------------------------------- config
-
-// GetConfig returns the active parameters and where they live.
-func (a *App) GetConfig() (out *view.ConfigView, err error) {
-	defer a.recoverFault("GetConfig", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	return &view.ConfigView{Config: a.cfg.Get(), Path: a.cfg.Path()}, nil
-}
-
-// SaveConfig validates and persists parameters, reporting any corrections.
-func (a *App) SaveConfig(c config.Config) (out []string, err error) {
-	defer a.recoverFault("SaveConfig", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	notes, err := a.cfg.Save(c)
-	if notes == nil {
-		// Wails turns a nil slice into null; the dialog reads this as an array.
-		notes = []string{}
-	}
-	if err != nil {
-		a.log.Error("参数", "保存失败: %v", err)
-		return notes, err
-	}
-	if len(notes) > 0 {
-		for _, n := range notes {
-			a.log.Warn("参数", "%s", n)
-		}
-	} else {
-		a.log.Success("参数", "已保存：读取列数 %d，LOC 筛选 %s，每页 %d 行，导出模式 %s",
-			c.ReadColumns, c.LOCFilter, c.PageSize, c.ExportMode)
-	}
-	return notes, nil
-}
-
-// ResetConfig restores the shipped defaults.
-func (a *App) ResetConfig() (out *view.ConfigView, err error) {
-	defer a.recoverFault("ResetConfig", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	if err := a.cfg.ResetToDefault(); err != nil {
-		return nil, err
-	}
-	a.log.Info("参数", "已恢复默认参数")
-	return &view.ConfigView{Config: a.cfg.Get(), Path: a.cfg.Path()}, nil
-}
-
-// ---------------------------------------------------------------- logs
-
-// ReportFrontendError records a webview-side exception in the same log the
-// status bar shows, so a rendering failure is diagnosable instead of blank.
-func (a *App) ReportFrontendError(message, stack, source string) {
-	defer a.recoverFault("ReportFrontendError", nil)
-	if a.log == nil {
-		return
-	}
-	where := source
-	if where == "" {
-		where = "界面"
-	}
-	a.log.Error(where, "前端异常: %s", message)
-	if stack != "" {
-		a.log.Error(where, "调用栈: %s", truncate(stack, 2000))
-	}
-}
-
-// GetLogs returns the most recent log entries.
-func (a *App) GetLogs(limit int) []logging.Entry {
-	defer a.recoverFault("GetLogs", nil)
-	_ = a.waitBoot()
-	if a.log == nil {
-		return nil
-	}
-	return a.log.Recent(limit)
-}
-
-// ClearLogs empties the in-memory log buffer.
-func (a *App) ClearLogs() {
-	defer a.recoverFault("ClearLogs", nil)
-	if a.log != nil {
-		a.log.Clear()
-	}
-}
-
-// ---------------------------------------------------------------- windows
-//
-// Wails v2 is a single-window framework: there is no WindowCreate, and the
-// runtime window calls only ever act on the calling window. The secondary
-// views (history, settings, about) are therefore rendered as full-height
-// overlays inside the main window rather than as separate OS windows.
-
-// Quit shuts the application down.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + " …"
 }
 
 func (a *App) Quit() {

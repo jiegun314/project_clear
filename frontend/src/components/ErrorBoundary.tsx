@@ -46,7 +46,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <Alert
           type="error"
           showIcon
-          message="界面渲染失败"
+          title="界面渲染失败"
           description={
             <>
               <Typography.Paragraph style={{ marginBottom: 8 }}>

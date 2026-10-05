@@ -3,6 +3,10 @@ build/bin
 # 正常情况下构建结束就已归还，留下它说明上次构建被中断，别提交。
 build/.clear-build-stash/
 node_modules
+# Build output of the frontend. It is produced by `npm run build` / `wails build`,
+# and the Go side embeds it, so the app package only compiles once the frontend
+# has been built at least once. CI creates a placeholder for the steps that only
+# type-check and test; see .github/workflows/ci.yml.
 frontend/dist
 .DS_Store
 

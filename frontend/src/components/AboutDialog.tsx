@@ -135,7 +135,7 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
         centered
         // 点遮罩不关闭：触发它的那一下点击就落在刚出现的遮罩上，默认行为会把它自己关掉；
         // 关这个弹窗只认右上角的按钮。
-        maskClosable={false}
+        mask={{ closable: false }}
         width={EGG_CONTENT_SIZE}
         title="🐶Puppy Approved!🐾"
         // 面板内边距在 style.css 里按这个类名归零，内容区才能是整 331×331。

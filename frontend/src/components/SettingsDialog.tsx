@@ -160,7 +160,7 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
       )}
 
       {!loading && cfg && error && (
-        <Alert type="error" showIcon style={{ marginBottom: 14 }} message="操作失败" description={error} />
+        <Alert type="error" showIcon style={{ marginBottom: 14 }} title="操作失败" description={error} />
       )}
 
       {!loading && cfg && notes.length > 0 && (
@@ -168,7 +168,7 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
           type="warning"
           showIcon
           style={{ marginBottom: 14 }}
-          message="参数已自动修正"
+          title="参数已自动修正"
           description={
             <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
               {notes.map((n) => (

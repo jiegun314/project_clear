@@ -114,9 +114,9 @@ export function Toolbar(p: ToolbarProps) {
         <span style={{ fontWeight: 600, color: JNJ.ink, letterSpacing: 1 }}>CLEAR</span>
         <span style={{ color: JNJ.textMuted, fontSize: 12 }}>MPS 数据整合平台</span>
       </div>
-      <Divider type="vertical" style={{ height: 22, margin: '0 6px' }} />
+      <Divider orientation="vertical" style={{ height: 22, margin: '0 6px' }} />
       {renderActions(dataActions)}
-      <Divider type="vertical" style={{ height: 22, margin: '0 6px' }} />
+      <Divider orientation="vertical" style={{ height: 22, margin: '0 6px' }} />
       {/* The list behind 添加: which workbooks are in the integration list, and
           how many rows they brought in. It empties with 清空. */}
       <Tooltip title="查看整合清单里的文件" mouseEnterDelay={0.15}>

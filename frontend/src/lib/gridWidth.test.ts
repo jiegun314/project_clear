@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import { INDEX_BLOCK_WIDTH, WEEK_WIDTH, gridTableWidth } from './gridWidth.ts';
 

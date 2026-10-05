@@ -33,8 +33,8 @@ export function ImportResultModal({ open, result, onClose }: ImportResultModalPr
     >
       <Space size={40} style={{ margin: '8px 0 16px' }}>
         <Statistic title="处理文件" value={result.total} />
-        <Statistic title="成功" value={result.ok} valueStyle={{ color: JNJ.success }} />
-        <Statistic title="失败" value={result.failed} valueStyle={{ color: failed ? JNJ.danger : undefined }} />
+        <Statistic title="成功" value={result.ok} styles={{ content: { color: JNJ.success } }} />
+        <Statistic title="失败" value={result.failed} styles={{ content: { color: failed ? JNJ.danger : undefined } }} />
         <Statistic title="合并行数" value={result.rowsKept} />
         <Statistic title="耗时" value={result.durationMs} suffix="ms" />
       </Space>
@@ -57,7 +57,7 @@ export function ImportResultModal({ open, result, onClose }: ImportResultModalPr
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message={`${result.warnings.length} 条提示`}
+          title={`${result.warnings.length} 条提示`}
           description={
             <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
               {result.warnings.slice(0, 8).map((w) => (

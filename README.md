@@ -100,7 +100,7 @@ wails dev
 
 ```bash
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.6.0-darwin-arm64.zip。
+# 并打包成 dist/CLEAR-1.6.1-darwin-arm64.zip。
 # 它会保住 build/bin/data 与 build/bin/config（见下方注意事项）。
 ./scripts/build-darwin.sh
 
@@ -331,15 +331,75 @@ wails build -platform darwin/arm64 -clean
 # 变成与本项目无关的噪声（将来该依赖编译不过时还会误报到我们头上）。
 go vet ./internal/... ./tools/... .
 go test ./internal/... ./tools/... .
+```
 
+> `main.go` 里是 `//go:embed all:frontend/dist`，而 `frontend/dist` 是构建产物。
+> 因此上面两条命令里的 `.`（应用包，含 `app_version_test.go` 与架构约束测试）
+> 只有在**前端至少构建过一次**之后才能编译；全新克隆请先跑
+> `npm --prefix frontend run build`（或直接 `wails build`）。CI 用一个占位文件
+> 解决这件事，见 `.github/workflows/ci.yml`。
+
+```bash
 # 前端：类型检查 + lint + 单元测试（等价于三条命令相加）
 npm --prefix frontend run check
 
+# 只跑测试；--watch 用于开发
+npm --prefix frontend test
+npm --prefix frontend run test:watch
+```
+
+前端测试跑在 **vitest** 上（`vite.config.ts` 里的 `test` 段），浏览器环境用
+`jsdom`。一套 runner 覆盖两类测试：
+
+| 目录 | 测什么 | 说明 |
+| --- | --- | --- |
+| `src/lib/*.test.ts` | 纯函数 | 不需要 DOM，最快、最稳，是首选形态——逻辑尽量下沉到这里 |
+| `src/components/*.test.tsx` | 组件行为 | 用 `@testing-library/react`，覆盖**取数 / 空态 / 错误态** |
+| `src/App.test.tsx` | 外壳行为 | 状态栏数值、导入结果弹窗、失败提示、"整合"是否可用、分割条、退出确认 |
+
+`src/App.tsx` 本身只剩装配（4 个 hook 调用 + JSX），状态与行为在
+`src/hooks/` 里：`useBackendState`（参数/状态/清单）、`useTaskRunner`（忙闲与进度）、
+`useAppActions`（工具栏五个动作与它们打开的弹窗）、`useSplitPane`（上下分割）。
+改一个界面通常只需要动一个文件。
+
+写组件测试的约定：**断言用户看得见的东西**（渲染出的文字、行数、空态），
+不要断言组件内部 state、也不要断言某个函数被调用的次数。前者会让重构变危险而不是变安全——
+把实现焊死的测试，在你想改实现的时候就只能删掉它。
+
+`src/test/setup.ts` 补了 jsdom 缺的两样东西（`ResizeObserver`、`matchMedia`），
+antd 的 Table 挂载时要用；测试之间会自动 cleanup。
+
+**antd 的弃用告警会让测试失败。** antd 遇到弃用属性只 `console.error` 一句就继续跑，
+于是组件会长期停在即将被移除的 API 上——外壳第一次进测试时就这样暴露了 4 处
+（`Alert.message`、`Divider.type`、`Modal.maskClosable`、`Statistic.valueStyle`），
+现已全部改成 antd 6 的新写法。`setup.ts` 会把这些告警收集起来、在测试结束时失败并
+指名是哪个属性。升级 antd 时若又出现同类告警，CI 会直接拦下而不是留下一行日志。
+
+```bash
 # 端到端验收：用 raw_data/mps_data 里的真实工作簿跑通
 # 导入 → 暂存查询 → 整合 → 导出 → 保真度审计 → 重复整合校验
 go run ./tools/e2e -in raw_data/mps_data -out /tmp/clear-e2e
 go run ./tools/e2e -in raw_data/mps_data -out /tmp/clear-e2e -clean   # 纯数据模式
 ```
+
+**验收已经进入 `go test`**，不再只靠手动运行：
+
+| 测试 | 何时运行 | 内容 |
+| --- | --- | --- |
+| `TestAcceptanceRunOnASyntheticWorkbook` | 每次都跑（约 0.05 秒） | 用一份程序生成的同结构小工作簿跑完整验收路径（导入 → 整合 → 两种模式导出 → 全部保真审计），**不需要 raw_data，因此 CI 也能跑** |
+| `TestAcceptanceRunOnTheRealWorkbooks` | 本机有 `raw_data/mps_data` 时 | 同一套验收路径跑真实部门工作簿；文件不存在则 skip |
+| 其余包 | 每次都跑 | 单测、绑定契约、版本一致性、架构约束 |
+
+两份工作簿的验收路径共用 `tools/e2e/harness` 里的同一份实现，所以手动验收与自动验收不会各自漂移。
+真实工作簿那一项要跑两分钟左右，`go test -short` 会跳过它：
+
+```bash
+go test -short ./internal/... ./tools/... .   # 快速迭代：跳过真实工作簿验收
+```
+
+CI（`.github/workflows/ci.yml`）在每次 push 与 PR 上运行上述全部检查，加上：
+`CGO_ENABLED=0` 的全量 vet/test（无需 GTK/WebKit 等系统依赖）、以及 windows/amd64 交叉编译，
+确保另一条发布目标不会被无声破坏。
 
 `tools/e2e` 的可用参数：
 

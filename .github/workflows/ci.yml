@@ -1,0 +1,91 @@
+name: CI
+
+# Every gate the repository has, run on every push and pull request. Before this
+# file existed the checks (go vet, unit tests, tsc, ESLint, the version-consistency
+# test, the binding-contract test) only ran when someone remembered to run them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded push does not need to finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (vet + tests, all packages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # main.go embeds `all:frontend/dist`, and the app package does not compile
+      # when that directory is missing — which it is on a fresh clone, because the
+      # real contents are build output. A real `wails build` compiles the frontend
+      # first; these steps only type-check and test, so a placeholder is enough.
+      - name: provide the embed target
+        run: mkdir -p frontend/dist && : > frontend/dist/index.html
+
+      # CGO_ENABLED=0 keeps this job free of system packages: the only cgo user is
+      # Wails' Linux window backend, and none of the packages under test touch it.
+      # The database driver (modernc.org/sqlite) is pure Go by design, which is
+      # what makes a cgo-free build of this application possible at all.
+      #
+      # The package list is explicit rather than ./... because npm can leave Go
+      # source under frontend/node_modules (a dependency ships a Go port), and CI
+      # must not start building that.
+      - name: go vet
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./internal/... ./tools/... .
+
+      - name: go test
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./internal/... ./tools/... .
+
+      # Proves the code base still builds for the other release target. Windows
+      # and macOS are what we ship; a regression here would otherwise only show
+      # up at release time.
+      - name: cross-compile (windows/amd64)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build ./internal/... ./tools/... .
+
+  frontend:
+    name: Frontend (typecheck + lint + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # One command for all three frontend gates: tsc (including the test files
+      # and the generated-binding contract), ESLint with --max-warnings=0, and the
+      # unit tests.
+      - name: npm run check
+        run: npm run check
+
+      - name: npm run build
+        run: npm run build

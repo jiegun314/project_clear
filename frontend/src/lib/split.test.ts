@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import { clampLower, lowerAfterDrag, splitBounds, SPLIT_BAR, TOP_MIN_HEIGHT } from './split.ts';
 

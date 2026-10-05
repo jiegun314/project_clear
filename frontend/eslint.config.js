@@ -24,4 +24,29 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { args: 'none', varsIgnorePattern: '^_' }],
     },
   },
+  {
+    // src/lib is the pure, unit-tested core: the only part of the frontend that
+    // `node --test` can exercise without a DOM. That is worth protecting, and it
+    // only stays true if importing a framework into it is an error rather than a
+    // judgement call — every React import added here would silently move a file
+    // out of the tested set.
+    files: ['src/lib/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['react', 'react-dom', 'react/*', 'react-dom/*', 'antd', 'antd/*', 'lucide-react'],
+              message: 'src/lib must stay framework-free so it can be tested without a DOM.',
+            },
+            {
+              group: ['**/components/**', '**/services/**', '**/theme/**'],
+              message: 'src/lib must not depend on the UI or the Wails bridge.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
