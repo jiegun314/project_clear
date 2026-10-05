@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App as AntApp, Modal, Tag, Tooltip, Spin, Alert } from 'antd';
+import { Modal, Tooltip, Spin, Alert } from 'antd';
 import { CircleCheck } from 'lucide-react';
 import { Toolbar } from './components/Toolbar';
 import { DataGrid } from './components/DataGrid';
@@ -12,6 +12,7 @@ import { HistoryView } from './components/HistoryView';
 import { StagedFilesModal } from './components/StagedFilesModal';
 import { JNJ } from './theme/jnj';
 import { api, hasBackend, onEvent } from './services/api';
+import { errorText } from './lib/errors';
 import { SPLIT_BAR, TOP_MIN_HEIGHT, clampLower, lowerAfterDrag, splitBounds } from './lib/split';
 import {
   acceptProgress,
@@ -589,10 +590,4 @@ function StatusBar({ status, progress }: { status: Status | null; progress: Task
       )}
     </div>
   );
-}
-
-function errorText(e: unknown): string {
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  return String(e);
 }

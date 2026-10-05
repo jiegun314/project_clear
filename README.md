@@ -99,12 +99,14 @@ wails dev
 ### 3.3 打包
 
 ```bash
-# 最简打包（仅 Apple Silicon），产物：build/bin/CLEAR.app
-wails build -platform darwin/arm64 -clean
-
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.5.9-darwin-arm64.zip
+# 并打包成 dist/CLEAR-1.6.0-darwin-arm64.zip。
+# 它会保住 build/bin/data 与 build/bin/config（见下方注意事项）。
 ./scripts/build-darwin.sh
+
+# 最简打包（仅 Apple Silicon），产物：build/bin/CLEAR.app。
+# 注意：-clean 会清空整个 build/bin，直接这么跑会删掉数据，详见下方。
+wails build -platform darwin/arm64 -clean
 ```
 
 发布包只出 **darwin/arm64**：通用二进制（arm64 + x86_64）会把 Go 二进制复制一份，
@@ -116,11 +118,25 @@ wails build -platform darwin/arm64 -clean
 | 命令 | 用途 |
 | --- | --- |
 | `wails build -skipbindings` | 没有改动 Go 的导出方法时跳过绑定生成，构建更快 |
-| `wails build -clean` | 清理缓存后重新构建（建议交付前使用） |
+| `wails build -clean` | 构建前清空整个 `build/bin` 目录（**包括数据，见下**） |
 | `wails doctor` | 检查本机 Wails 依赖是否齐全 |
 
-打包完成后双击 `build/bin/CLEAR.app` 即可运行。数据写在 **CLEAR.app 所在目录**下，
-不是 app 包内部，重新打包不会连带清掉数据。
+打包完成后双击 `build/bin/CLEAR.app` 即可运行。数据写在 **CLEAR.app 所在目录**下
+（即 `build/bin/data` 与 `build/bin/config`），不是 app 包内部。
+
+> **`wails build -clean` 会删掉数据。** 它清空的是整个 `build/bin` 目录，而程序把
+> 数据库和参数就放在那里，所以直接执行会连同 `data/`、`config/` 一起删掉。
+> `./scripts/build-darwin.sh` 已经处理了这一点：构建前把这两项暂存到
+> `build/.clear-build-stash`（`bin` 的同级、同一文件系统，改个名即可），构建结束
+> 立刻归还，并且用 `trap` 保证构建失败或中断时同样会归还。
+>
+> 需要自己手工 clean 构建时，先自行挪走数据：
+>
+> ```bash
+> mkdir -p build/.stash && mv build/bin/data build/bin/config build/.stash/
+> wails build -platform darwin/arm64 -clean
+> mv build/.stash/data build/.stash/config build/bin/
+> ```
 
 ### 3.4 首次启动
 
@@ -283,7 +299,9 @@ wails build -platform darwin/arm64 -clean
 | `<程序目录>/config/` | `clear.yaml` |
 
 - macOS 打包成 `CLEAR.app` 时，「程序目录」指 **CLEAR.app 所在的那一层**，
-  不是包内的 `Contents/MacOS`——这样数据不会被藏在 app 包里，重新打包也不会连带清掉。
+  不是包内的 `Contents/MacOS`——这样数据不会被藏在 app 包里，重装或替换 app 本身不影响它。
+  但**打包动作本身会**：`wails build -clean` 清空整个 `build/bin`，请用
+  `./scripts/build-darwin.sh`，或先自行挪走数据（见 [3.3 打包](#33-打包)）。
 - 该目录不可写时（例如装在 `/Applications`、或 app 被系统隔离），自动回退到 `~/.clear/`。
 - `go run` / `wails dev` 会把二进制放进临时目录，此时以**当前工作目录**为准，
   否则每次运行都会拿到一个空数据库。
@@ -308,12 +326,14 @@ wails build -platform darwin/arm64 -clean
 
 ```bash
 # 后端：全部单测 + 静态检查
-go vet ./...
-go test ./...
+# 注意用包列表而不是 ./...：npm 装的某个依赖（flatted）自带一份 Go 源码，
+# 一旦 frontend/node_modules 存在，./... 就会连它一起构建和检查，
+# 变成与本项目无关的噪声（将来该依赖编译不过时还会误报到我们头上）。
+go vet ./internal/... ./tools/... .
+go test ./internal/... ./tools/... .
 
-# 前端：类型检查 + 单元测试
-npm --prefix frontend run typecheck
-npm --prefix frontend test
+# 前端：类型检查 + lint + 单元测试（等价于三条命令相加）
+npm --prefix frontend run check
 
 # 端到端验收：用 raw_data/mps_data 里的真实工作簿跑通
 # 导入 → 暂存查询 → 整合 → 导出 → 保真度审计 → 重复整合校验

@@ -127,11 +127,6 @@ func attrValue(head, name string) (string, error) {
 	return "", fmt.Errorf("缺少属性 %s", name)
 }
 
-func hasAttr(head, name string) bool {
-	_, err := attrValue(head, name)
-	return err == nil
-}
-
 func replaceAttr(head, name, value string, replaced *bool) string {
 	fields := splitAttrs(head)
 	for i, field := range fields {
@@ -195,7 +190,9 @@ func parseRangeRef(ref string) (c1, r1, c2, r2 int, err error) {
 }
 
 func cellToCoords(cell string) (col, row int, err error) {
-	cell = strings.TrimSpace(strings.TrimPrefix(cell, "$"))
+	// Excel writes upper case, but a lower-case reference is still valid and
+	// must resolve rather than be silently skipped.
+	cell = strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(cell, "$")))
 	i := 0
 	for i < len(cell) && cell[i] >= 'A' && cell[i] <= 'Z' {
 		col = col*26 + int(cell[i]-'A'+1)

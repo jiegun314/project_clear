@@ -7,7 +7,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -104,9 +103,12 @@ func main() {
 	mark("暂存可查询: %d 行, 首页 %d 行", grid.Total, len(grid.Rows))
 
 	// ---- commit --------------------------------------------------------
-	entry, err := svc.Commit()
+	entry, overwrote, err := svc.Commit()
 	if err != nil {
 		fail("commit: %v", err)
+	}
+	if overwrote {
+		fail("首次整合被报告为覆盖原有数据")
 	}
 	mark("整合完成: %s -> %s, %d 行, %d 个文件", entry.WeekCode, entry.TableName, entry.RowCount, entry.FileCount)
 
@@ -124,9 +126,9 @@ func main() {
 		fail("export: %v", err)
 	}
 	mark("导出完成: %s (%d 字节)", dest, stats.SizeBytes)
-	fmt.Printf("    mode=%s rows=%d cols=%d styles=%d cfRows=%d comments=%d dropped=%d blanked=%d vba=%v\n",
+	fmt.Printf("    mode=%s rows=%d cols=%d styles=%d cfRows=%d comments=%d dropped=%d vba=%v\n",
 		stats.Mode, stats.Rows, stats.Cols, stats.StylesUsed, stats.CFRows, stats.Comments,
-		stats.CFRulesDropped, stats.BlankedRows, stats.PreservedVBA)
+		stats.CFRulesDropped, stats.PreservedVBA)
 
 	// ---- audit ---------------------------------------------------------
 	if err := audit(dest, *in, entry.WeekCode); err != nil {
@@ -147,9 +149,12 @@ func main() {
 	}
 	mark("重复整合: 未整合的临时数据未出现在查询列表")
 
-	again, err := svc.Commit()
+	again, overwroteAgain, err := svc.Commit()
 	if err != nil {
 		fail("re-commit: %v", err)
+	}
+	if !overwroteAgain {
+		fail("重复整合同一周码没有被报告为覆盖原有数据")
 	}
 	after, err := db.ListArchive()
 	if err != nil {
@@ -207,6 +212,29 @@ func audit(dest, srcDir, weekCode string) error {
 		}
 	}
 	mark("审计: 导出文件共 %d 行，表头前的 %d 行已移除", len(rows), mps.DropRows)
+
+	// 0. The declared used range must cover the sheet's content. Both engines
+	// set it for the header block before the data is written, and a range that
+	// stops there makes dimension-respecting readers — openpyxl's read_only
+	// mode among them — report an empty workbook even though every row is
+	// present and Excel itself recalculates the range on open.
+	headerRow := rows[mps.ExportHeaderRow-1]
+	if len(headerRow) <= mps.IndexCols {
+		return fmt.Errorf("导出文件表头只有 %d 列，缺少周数据列", len(headerRow))
+	}
+	lastColName, err := mps.ColumnName(len(headerRow))
+	if err != nil {
+		return err
+	}
+	wantDim := fmt.Sprintf("A1:%s%d", lastColName, len(rows))
+	dim, err := f.GetSheetDimension(mps.SheetName)
+	if err != nil {
+		return fmt.Errorf("读取 dimension 失败: %w", err)
+	}
+	if dim != wantDim {
+		return fmt.Errorf("dimension = %q, 期望 %q（共 %d 行 × %d 列）", dim, wantDim, len(rows), len(headerRow))
+	}
+	mark("审计: dimension %s 覆盖全部 %d 行", dim, len(rows))
 
 	// 1. header block must be intact, on its new first row
 	for c := 1; c <= mps.IndexCols; c++ {
@@ -271,6 +299,13 @@ func audit(dest, srcDir, weekCode string) error {
 	}
 	raw, err := mps.ZipPartForTest(dest, part)
 	if err != nil {
+		return err
+	}
+	// The frozen pane and the filter range are stored in source row numbers, so
+	// they have to move up with the header. A split left as-is freezes the top
+	// of the data block, and a filter range left as-is points at rows that no
+	// longer hold that data.
+	if err := auditSheetView(raw, len(rows)); err != nil {
 		return err
 	}
 	cf, err := mps.ParseCFRowsFrom(raw, mps.ExportFirstDataRow)
@@ -373,6 +408,48 @@ func audit(dest, srcDir, weekCode string) error {
 		} else {
 			mark("审计: 模板部件保留 -> %s", detail)
 		}
+	}
+	return nil
+}
+
+// auditSheetView checks the two pieces of sheet furniture that are expressed in
+// row numbers and therefore have to be rebased with the header: the frozen pane
+// and the filter range. Both were left at their source values, which froze the
+// first 54 data rows and filtered a range that no longer holds that data.
+func auditSheetView(raw []byte, dataRows int) error {
+	if m := regexp.MustCompile(`<pane[^>]*>`).Find(raw); m != nil {
+		tag := string(m)
+		if s := regexp.MustCompile(`ySplit="(\d+)"`).FindStringSubmatch(tag); s != nil {
+			n, err := strconv.Atoi(s[1])
+			if err != nil {
+				return fmt.Errorf("冻结窗格 ySplit 无法解析: %q", s[1])
+			}
+			if n > mps.ExportBlankRow {
+				return fmt.Errorf("冻结窗格 ySplit=%d 超过了表头的 %d 行，会冻结数据行: %s",
+					n, mps.ExportBlankRow, tag)
+			}
+		}
+		if t := regexp.MustCompile(`topLeftCell="([A-Z]+)(\d+)"`).FindStringSubmatch(tag); t != nil {
+			row, err := strconv.Atoi(t[2])
+			if err != nil {
+				return fmt.Errorf("冻结窗格 topLeftCell 无法解析: %q", t[0])
+			}
+			if row > dataRows {
+				return fmt.Errorf("冻结窗格 topLeftCell 行 %d 超出 %d 行数据范围: %s", row, dataRows, tag)
+			}
+		}
+		mark("审计: 冻结窗格已随表头重定位 (%s)", strings.TrimSpace(tag))
+	}
+	if m := regexp.MustCompile(`<autoFilter[^>]*ref="([A-Z]+)(\d+):`).FindSubmatch(raw); m != nil {
+		row, err := strconv.Atoi(string(m[2]))
+		if err != nil {
+			return fmt.Errorf("autoFilter 起始行无法解析: %q", m[2])
+		}
+		if row > mps.ExportFirstDataRow {
+			return fmt.Errorf("autoFilter 起始行 %d 落在数据区中段，未随表头上移 (期望 <= %d)",
+				row, mps.ExportFirstDataRow)
+		}
+		mark("审计: 筛选区域已随表头重定位 (起始行 %d)", row)
 	}
 	return nil
 }
@@ -663,20 +740,15 @@ func firstSource(dir string) string {
 }
 
 func compareParts(src, dest string) (bool, string) {
-	sp, err := mps.SheetPartPath(src, mps.SheetName)
-	if err != nil {
+	// Both lookups exist for their error: a workbook whose MPS sheet cannot be
+	// located is a different kind of failure from a part that differs.
+	if _, err := mps.SheetPartPath(src, mps.SheetName); err != nil {
 		return true, "源文件结构无法解析，跳过"
 	}
-	dp, err := mps.SheetPartPath(dest, mps.SheetName)
-	if err != nil {
+	if _, err := mps.SheetPartPath(dest, mps.SheetName); err != nil {
 		return false, "导出文件缺少 MPS 工作表"
 	}
 	var kept []string
-	for _, p := range []string{"xl/vbaProject.bin", "xl/theme/theme1.xml", "xl/pivotCache"} {
-		_ = p
-	}
-	_ = sp
-	_ = dp
 	for _, p := range []string{"xl/theme/theme1.xml"} {
 		a, err1 := mps.ZipPartForTest(src, p)
 		b, err2 := mps.ZipPartForTest(dest, p)
@@ -702,5 +774,3 @@ func fail(format string, args ...any) {
 	fmt.Printf("FAIL: "+format+"\n", args...)
 	os.Exit(1)
 }
-
-var _ = json.Marshal

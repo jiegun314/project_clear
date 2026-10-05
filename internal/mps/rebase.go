@@ -79,18 +79,119 @@ func rebaseSheetXML(doc []byte, totalCols int) ([]byte, error) {
 	rebuilt := sheet[:bodyStart] + rows.String() + sheet[closeIdx:]
 	rebuilt = rebaseDimension(rebuilt, totalCols, ExportBlankRow)
 	rebuilt = rebaseMergeCells(rebuilt)
+	// The frozen pane and the filter range are expressed in source row numbers
+	// too, so they have to move up with everything else.
+	rebuilt = rebasePane(rebuilt)
+	rebuilt = rebaseAutoFilter(rebuilt)
 	return []byte(rebuilt), nil
+}
+
+// rebasePane moves a frozen-pane split onto the rebuilt sheet. The rows above
+// the header are gone, so a split still measured in source rows would freeze
+// the top of the data block and leave the workbook scrolled outside the table.
+func rebasePane(doc string) string {
+	at := strings.Index(doc, "<pane ")
+	if at < 0 {
+		return doc
+	}
+	name, attrs, bodyStart, selfClosing, err := openTagEnd(doc, at)
+	if err != nil || name != "pane" {
+		return doc
+	}
+	next := attrs
+	changed := false
+	if y, err := attrIntFrom(attrs, "ySplit"); err == nil {
+		if shifted := shiftRowUp(y); shifted != y {
+			next = setAttr(next, "ySplit", strconv.Itoa(shifted))
+			changed = true
+		}
+	}
+	if cell, err := attrValue(attrs, "topLeftCell"); err == nil {
+		if shifted, ok := shiftCellRowUp(cell); ok && shifted != cell {
+			next = setAttr(next, "topLeftCell", shifted)
+			changed = true
+		}
+	}
+	if !changed {
+		return doc
+	}
+	return doc[:at] + rebuildTag(name, next, selfClosing) + doc[bodyStart:]
+}
+
+// rebaseAutoFilter shifts the filter range onto the rebuilt sheet, for the same
+// reason as the pane: its rows were the source's row numbers, so a range left
+// untouched would filter rows that no longer hold that data.
+func rebaseAutoFilter(doc string) string {
+	at := strings.Index(doc, "<autoFilter ")
+	if at < 0 {
+		return doc
+	}
+	name, attrs, bodyStart, selfClosing, err := openTagEnd(doc, at)
+	if err != nil || name != "autoFilter" {
+		return doc
+	}
+	ref, err := attrValue(attrs, "ref")
+	if err != nil {
+		return doc
+	}
+	shifted, ok := shiftRangeUp(ref)
+	if !ok || shifted == ref {
+		return doc
+	}
+	return doc[:at] + rebuildTag(name, setAttr(attrs, "ref", shifted), selfClosing) + doc[bodyStart:]
+}
+
+// rebuildTag renders an opening tag from a possibly rewritten attribute list.
+func rebuildTag(name, attrs string, selfClosing bool) string {
+	if selfClosing {
+		return "<" + name + " " + attrs + "/>"
+	}
+	return "<" + name + " " + attrs + ">"
+}
+
+// shiftRowUp maps a source row onto the rebuilt sheet, where the rows above the
+// header no longer exist. A row at or above the header keeps the first row.
+func shiftRowUp(row int) int {
+	if row -= DropRows; row < 1 {
+		return 1
+	}
+	return row
+}
+
+// shiftCellRowUp shifts the row part of a single reference such as "AO114".
+func shiftCellRowUp(cell string) (string, bool) {
+	col, row, err := cellToCoords(cell)
+	if err != nil {
+		return "", false
+	}
+	out := CellRef(col, shiftRowUp(row))
+	if out == "" {
+		return "", false
+	}
+	return out, true
+}
+
+// shiftRangeUp shifts both ends of a range such as "A57:DO435".
+func shiftRangeUp(ref string) (string, bool) {
+	c1, r1, c2, r2, err := parseRangeRef(ref)
+	if err != nil {
+		return "", false
+	}
+	out, err := rangeRef(c1, shiftRowUp(r1), c2, shiftRowUp(r2))
+	if err != nil {
+		return "", false
+	}
+	return out, true
 }
 
 // rebaseRow renumbers one row and its cells, keeps only the exported columns
 // and drops formulas: the header is a static block of names and dates, and its
 // formulas refer to rows that no longer exist. Their cached values are kept.
 func rebaseRow(el xmlElement, newRow, totalCols int) (string, error) {
-	name, attrs, _, selfClosing, err := openTagEnd(el.raw, 0)
+	_, attrs, _, selfClosing, err := openTagEnd(el.raw, 0)
 	if err != nil {
 		return "", err
 	}
-	_ = name
 	if selfClosing {
 		return "<row " + setAttr(attrs, "r", strconv.Itoa(newRow)) + "/>", nil
 	}

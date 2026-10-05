@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Segmented, Button, Tooltip, Empty } from 'antd';
+import { Segmented, Tooltip, Empty } from 'antd';
 import { ScrollText, Eraser } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api, onEvent } from '../services/api';
@@ -46,7 +46,11 @@ export function LogPanel() {
     let alive = true;
     api
       .getLogs(500)
-      .then((e) => alive && setEntries((e ?? []).slice().reverse()))
+      // The backend already returns newest first, which is the order this panel
+      // shows: the label says 新日志置顶, live entries are prepended and the box
+      // is pinned to scrollTop 0. Reversing the backlog here put the oldest line
+      // at the top of a list that claims the opposite.
+      .then((e) => alive && setEntries(e ?? []))
       .catch(() => undefined);
     return () => {
       alive = false;

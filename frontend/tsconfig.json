@@ -18,14 +18,21 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // An unused import or parameter is dead weight that shipped unnoticed for
+    // several releases, so it is an error rather than a warning.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // The lib tests import their subject with the explicit ".ts" extension so
+    // node --test can resolve it; tsc needs this to accept that form.
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src"
   ],
-  "exclude": [
-    "src/**/*.test.ts"
-  ],
+  // The *.test.ts files are deliberately NOT excluded: a type error in a test
+  // is still a type error, and the tests are the only thing checking the pure
+  // helpers.
   "references": [
     {
       "path": "./tsconfig.node.json"

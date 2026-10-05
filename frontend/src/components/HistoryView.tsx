@@ -4,7 +4,9 @@ import type { ColumnsType } from 'antd/es/table';
 import { Search, FileDown, RefreshCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
-import { INDEX_BLOCK_WIDTH, INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
+import { INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
+import { formatIndexCell } from '../lib/format';
+import { indexSortKey } from '../lib/sortKeys';
 import { buildWeekColumns } from './weekColumns';
 import type { ExportResult, GridHeader, GridRow } from '../types';
 
@@ -43,12 +45,19 @@ export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }
   const reqId = useRef(0);
   // 每次换一周只通知一次，避免翻页/排序时反复触发。
   const readySent = useRef(false);
+  // 父组件多数时候传的是行内箭头函数，每次渲染都是新身份。把它直接写进依赖数组，
+  // 会让表头请求和分页查询跟着父组件的**任何**状态变化（进度事件、提示消息…）
+  // 重新发一遍，所以这里只保存最新的回调，依赖保持稳定。
+  const onReadyRef = useRef(onReady);
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
 
   const notifyReady = useCallback(() => {
     if (readySent.current) return;
     readySent.current = true;
-    onReady?.();
-  }, [onReady]);
+    onReadyRef.current?.();
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
@@ -114,12 +123,12 @@ export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }
     const base: ColumnsType<GridRow> = names.map((name, i) => ({
       title: <Tooltip title={`固定索引 第 ${i + 1} 列`}><span>{name || `列${i + 1}`}</span></Tooltip>,
       dataIndex: ['index', i],
-      key: `c${i}`,
+      key: indexSortKey(i),
       width: INDEX_WIDTHS[i] ?? 120,
       // 与主表一致：ITEM 与第二个 LOC 固定，横向滚动时保持可见。
       fixed: i === 8 || i === 14 ? 'left' : undefined,
       ellipsis: true,
-      render: (v: string) => <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{v === '' ? '—' : v}</span>,
+      render: (v: string) => <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{formatIndexCell(i, v)}</span>,
     }));
     const weekCols = buildWeekColumns(header?.weeks ?? [], 'twoRow');
     return [...base, ...weekCols].map((c) => ({

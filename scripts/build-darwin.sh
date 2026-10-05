@@ -23,8 +23,64 @@ RESOURCES="$APP/Contents/Resources"
 PLIST="$APP/Contents/Info.plist"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
+# `wails build -clean` deletes the whole build/bin directory, and the running
+# program keeps its database and parameters there: build/bin/data/clear.db and
+# build/bin/config/clear.yaml (README 第 7 节). Cleaning them away would destroy
+# the user's data.
+#
+# They are moved to build/ — the parent of bin, so the same file system and the
+# move is a rename even for a multi-gigabyte database — and put back afterwards.
+# The trap covers a failed build and the early-exit paths, and rmdir only removes
+# the stash when it is empty, so a failed move can never delete what it held.
+BIN_DIR="build/bin"
+STASH_DIR="build/.clear-build-stash"
+RUNTIME_DIRS=(data config)
+
+restore_runtime_data() {
+  [[ -d "$STASH_DIR" ]] || return 0
+  mkdir -p "$BIN_DIR"
+  for name in "${RUNTIME_DIRS[@]}"; do
+    if [[ -e "$STASH_DIR/$name" && ! -e "$BIN_DIR/$name" ]]; then
+      mv "$STASH_DIR/$name" "$BIN_DIR/$name" || true
+    fi
+  done
+  rmdir "$STASH_DIR" 2>/dev/null || true
+  return 0
+}
+
+stash_runtime_data() {
+  local moved=0
+  for name in "${RUNTIME_DIRS[@]}"; do
+    if [[ -e "$BIN_DIR/$name" ]]; then
+      mkdir -p "$STASH_DIR"
+      mv "$BIN_DIR/$name" "$STASH_DIR/$name"
+      moved=1
+    fi
+  done
+  [[ "$moved" == 1 ]] && echo "    运行数据已暂存到 ${STASH_DIR}（-clean 会清空 build/bin）"
+  return 0
+}
+
+trap restore_runtime_data EXIT
+
+# A stash left behind by an interrupted earlier run is returned before anything
+# else, so its data is never forgotten.
+restore_runtime_data
+stash_runtime_data
+
 echo "==> 构建 (darwin/arm64)"
 wails build -platform darwin/arm64 -clean
+
+# Hand the data back immediately, so the checks and the packaging below see the
+# directory the way the application expects it.
+restore_runtime_data
+for name in "${RUNTIME_DIRS[@]}"; do
+  if [[ -d "$STASH_DIR/$name" ]]; then
+    echo "!! 运行数据未能归还，仍在 $STASH_DIR/$name" >&2
+    echo "!! 请手动移回 $BIN_DIR/$name 后再运行程序" >&2
+    exit 1
+  fi
+done
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "非 macOS，跳过图标与 plist 检查"

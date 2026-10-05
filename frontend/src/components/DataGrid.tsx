@@ -4,7 +4,9 @@ import type { ColumnsType, TableProps } from 'antd/es/table';
 import { Search, RotateCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
-import { INDEX_BLOCK_WIDTH, INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
+import { INDEX_WIDTHS, gridTableWidth } from '../lib/gridWidth';
+import { formatIndexCell } from '../lib/format';
+import { indexSortKey } from '../lib/sortKeys';
 import { buildWeekColumns } from './weekColumns';
 import type { GridHeader, GridRow } from '../types';
 
@@ -94,7 +96,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
       if (id !== reqId.current) return;
       setRows(res.rows ?? []);
       setTotal(res.total ?? 0);
-    } catch (e) {
+    } catch {
       if (id === reqId.current) {
         setRows([]);
         setTotal(0);
@@ -117,20 +119,17 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
         </Tooltip>
       ),
       dataIndex: ['index', i],
-      key: `c${i}`,
+      key: indexSortKey(i),
       width: INDEX_WIDTHS[i] ?? 120,
       // ITEM（第 9 列）与第二个 LOC（第 15 列，AdjDmd / CalcOH / WOS 这些
       // 标签）始终留在左侧，向右滚动时两者都可见。
       fixed: i === 8 || i === 14 ? 'left' : undefined,
       ellipsis: true,
-      render: (v: string, row) => {
-        const text = v === '' ? '—' : v;
-        return (
-          <Tooltip title={row.fileName ? `${row.fileName} · 源第 ${row.srcRow} 行` : undefined}>
-            <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{text}</span>
-          </Tooltip>
-        );
-      },
+      render: (v: string, row) => (
+        <Tooltip title={row.fileName ? `${row.fileName} · 源第 ${row.srcRow} 行` : undefined}>
+          <span style={{ color: v === '' ? JNJ.textMuted : undefined }}>{formatIndexCell(i, v)}</span>
+        </Tooltip>
+      ),
     }));
   }, [header]);
 

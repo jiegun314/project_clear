@@ -1,10 +1,15 @@
 build/bin
+# 打包脚本在 `-clean` 期间暂存 build/bin/data 与 build/bin/config 的目录；
+# 正常情况下构建结束就已归还，留下它说明上次构建被中断，别提交。
+build/.clear-build-stash/
 node_modules
 frontend/dist
 .DS_Store
 
 # 打包产物
-dist/
+# 前导斜杠不可省：没有它，`dist/` 会匹配任意层级的 dist 目录
+# （例如 internal/store/dist/），把本该入库的文件静默吞掉。
+/dist/
 frontend/.npm-cache/
 tools/spike/
 
@@ -17,6 +22,12 @@ raw_data/resource/*
 !raw_data/resource/easter_egg.png
 !raw_data/resource/Small-dog-barking-sound-effect.mp3
 
-# 运行期状态（参数与数据库），随程序目录生成
-config/
-data/
+# 运行期状态（参数与数据库），随程序目录生成。
+#
+# 前导斜杠不可省：`config/` 与 `data/` 的本意只是仓库根目录下由程序生成的
+# 那两个目录，但没有斜杠时它们会匹配**任意层级**的同名目录，于是
+# internal/config/ 整个包都被忽略——config.go、embed.go 这些已入库的文件
+# 变成「已跟踪但被忽略」，而新加的文件（如 internal/config/*_test.go）
+# 则直接不入库，全新克隆时会缺文件。锚定到根目录即可。
+/config/
+/data/

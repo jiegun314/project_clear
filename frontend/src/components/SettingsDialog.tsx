@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Modal, Form, InputNumber, Input, Radio, Alert, Typography, Button, Tooltip } from 'antd';
+import { Modal, Form, InputNumber, Input, Radio, Alert, Typography, Button, Tooltip, Spin, Empty } from 'antd';
 import { FolderCog, RotateCcw, Check, X } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
+import { errorText } from '../lib/errors';
 import type { AppConfig } from '../types';
 
 export interface SettingsDialogProps {
@@ -35,9 +36,16 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
   const [path, setPath] = useState('');
   const [notes, setNotes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // Loading and failure are states of this dialog, not reasons to disappear: the
+  // old `if (!cfg) return null` meant a failed load left the window invisible
+  // with no explanation, and the button appeared to do nothing.
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
+    setLoading(true);
+    setError('');
     api
       .getConfig()
       .then((v) => {
@@ -45,19 +53,27 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
         setPath(v.path);
         setNotes([]);
       })
-      .catch(() => setCfg(null));
+      .catch((e) => {
+        setCfg(null);
+        setError(errorText(e));
+      })
+      .finally(() => setLoading(false));
   }, [open]);
 
-  if (!cfg) return null;
+  if (!open) return null;
 
   const save = async () => {
+    if (!cfg) return;
     setSaving(true);
+    setError('');
     try {
       const n = await api.saveConfig(cfg);
       setNotes(n ?? []);
       const v = await api.getConfig();
       setCfg(v.config);
       onSaved(v.config);
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -65,11 +81,14 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
 
   const reset = async () => {
     setSaving(true);
+    setError('');
     try {
       const v = await api.resetConfig();
       setCfg(v.config);
       setNotes(['已恢复出厂默认参数']);
       onSaved(v.config);
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -113,6 +132,7 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
                 type="primary"
                 icon={<Check size={16} />}
                 onClick={save}
+                disabled={saving || !cfg}
                 loading={saving}
                 aria-label="保存参数"
                 style={{ background: JNJ.red, borderColor: JNJ.red }}
@@ -122,7 +142,28 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
         </div>
       }
     >
-      {notes.length > 0 && (
+      {loading && (
+        <div style={{ padding: '32px 0', textAlign: 'center' }}>
+          <Spin />
+        </div>
+      )}
+
+      {!loading && !cfg && (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <span style={{ color: JNJ.danger }}>
+              {error ? `参数读取失败：${error}` : '参数读取失败'}
+            </span>
+          }
+        />
+      )}
+
+      {!loading && cfg && error && (
+        <Alert type="error" showIcon style={{ marginBottom: 14 }} message="操作失败" description={error} />
+      )}
+
+      {!loading && cfg && notes.length > 0 && (
         <Alert
           type="warning"
           showIcon
@@ -140,6 +181,7 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
         />
       )}
 
+      {!loading && cfg && (
       <Form layout="vertical" size="middle">
         <Section first>
           <Form.Item
@@ -208,6 +250,7 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
           </Typography.Text>
         </Section>
       </Form>
+      )}
     </Modal>
   );
 }

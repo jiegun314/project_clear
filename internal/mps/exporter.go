@@ -67,17 +67,26 @@ type ExportRow struct {
 
 // ExportStats summarises what an export produced.
 type ExportStats struct {
-	Rows           int    `json:"rows"`
-	Cols           int    `json:"cols"`
-	Mode           string `json:"mode"`
-	Comments       int    `json:"comments"`
-	CFRows         int    `json:"cfRows"`
-	StylesUsed     int    `json:"stylesUsed"`
-	CFRulesDropped int    `json:"cfRulesDropped"`
-	BlankedRows    int    `json:"blankedRows"`
-	PreservedVBA   bool   `json:"preservedVba"`
-	DurationMS     int64  `json:"durationMs"`
-	SizeBytes      int64  `json:"sizeBytes"`
+	Rows       int    `json:"rows"`
+	Cols       int    `json:"cols"`
+	Mode       string `json:"mode"`
+	Comments   int    `json:"comments"`
+	CFRows     int    `json:"cfRows"`
+	StylesUsed int    `json:"stylesUsed"`
+	// CFRulesDropped is the historical name for the count of cells that could not
+	// be written or whose style could not be restored. It is reported to the UI
+	// under that name, so the field keeps it.
+	CFRulesDropped int   `json:"cfRulesDropped"`
+	PreservedVBA   bool  `json:"preservedVba"`
+	DurationMS     int64 `json:"durationMs"`
+	SizeBytes      int64 `json:"sizeBytes"`
+	// Warnings lists the detail that could not be reproduced in the output.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// warn records a detail that could not be reproduced.
+func (e *ExportStats) warn(format string, args ...any) {
+	e.Warnings = append(e.Warnings, fmt.Sprintf(format, args...))
 }
 
 // styleResolver maps a stored style signature onto a style index in the target
@@ -192,33 +201,19 @@ func exportTemplate(in ExportInput, totalCols int, stats *ExportStats) error {
 	}
 	// Rows 1..54 are the report's decoration, not data. The sheet part was
 	// rebased before this file was opened (see rebase.go), so what is left is
-	// the header on rows 1..3 and nothing below it.
-
-	// The template's own data rows are overwritten rather than deleted:
-	// excelize's RemoveRow re-adjusts the whole sheet on every call, which is
-	// quadratic and would also renumber the conditional formats.
-	lastTemplateRow, err := lastDataRow(f)
-	if err != nil {
-		return err
-	}
+	// the header on rows 1..3 and nothing below it. There is therefore nothing
+	// to blank underneath the merged block: the rebase already removed every
+	// row the template had below the header. (A blanking pass used to sit here;
+	// it could never run, because it measured the sheet after that rebase — so
+	// it is gone rather than left to look like a safeguard.)
 
 	res := newStyleResolver(f)
 	stats.CFRulesDropped = writeRows(f, in, res, totalCols)
+	if stats.CFRulesDropped > 0 {
+		stats.warn("有 %d 个单元格写入失败或样式无法还原", stats.CFRulesDropped)
+	}
 	stats.StylesUsed = len(res.bySig)
 
-	// Blank whatever the template had below the merged block so no stale rows
-	// survive underneath the new data.
-	newLast := ExportFirstDataRow + len(in.Rows) - 1
-	if lastTemplateRow > newLast {
-		for r := newLast + 1; r <= lastTemplateRow; r++ {
-			for c := 1; c <= totalCols; c++ {
-				if err := f.SetCellStr(SheetName, CellRef(c, r), ""); err != nil {
-					return err
-				}
-			}
-		}
-		stats.BlankedRows = lastTemplateRow - newLast
-	}
 	// Annotations are re-anchored rather than copied: whatever the template
 	// carried in the data area belonged to its own rows, which the merged data
 	// has just replaced.
@@ -343,6 +338,9 @@ func exportClean(in ExportInput, totalCols int, stats *ExportStats) error {
 
 	res := newStyleResolver(f)
 	stats.CFRulesDropped = writeRows(f, in, res, totalCols)
+	if stats.CFRulesDropped > 0 {
+		stats.warn("有 %d 个单元格写入失败或样式无法还原", stats.CFRulesDropped)
+	}
 	stats.StylesUsed = len(res.bySig)
 	stats.Comments = addComments(f, in)
 
@@ -551,26 +549,6 @@ func clearDataComments(f *excelize.File) {
 		}
 		_ = f.DeleteComment(SheetName, c.Cell)
 	}
-}
-
-func lastDataRow(f *excelize.File) (int, error) {
-	rows, err := f.GetRows(SheetName, excelize.Options{RawCellValue: true})
-	if err != nil {
-		return 0, err
-	}
-	last := 0
-	for i, r := range rows {
-		if i+1 < ExportFirstDataRow {
-			continue
-		}
-		for _, v := range r {
-			if strings.TrimSpace(v) != "" {
-				last = i + 1
-				break
-			}
-		}
-	}
-	return last, nil
 }
 
 // copyHeaderBlock reproduces the template's header into a clean workbook: the

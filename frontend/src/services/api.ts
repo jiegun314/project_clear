@@ -53,7 +53,6 @@ interface RuntimeBindings {
   WindowHide(): void;
   Quit(): void;
   BrowserOpenURL(url: string): void;
-  WindowSetTitle(title: string): void;
 }
 
 declare global {
@@ -86,7 +85,6 @@ export const api = {
   clearStaging: () => app().ClearStaging(),
   /** mode is "", "clean" or "template"; "" follows the configured default. */
   export: (weekCode: string, mode: string) => app().Export(weekCode, mode),
-  revealExport: (path: string) => app().RevealExport(path),
   queryData: (q: GridQuery) => app().QueryData(q),
   getGridHeader: (source: string) => app().GetGridHeader(source),
   getArchive: () => app().GetArchive(),
@@ -108,6 +106,3 @@ export function onEvent<T>(name: string, cb: (payload: T) => void): () => void {
   return rt.EventsOn(name, (...data: unknown[]) => cb(data[0] as T));
 }
 
-export const hideSelf = () => window.runtime?.WindowHide();
-export const quitApp = () => window.runtime?.Quit();
-export const openURL = (url: string) => window.runtime?.BrowserOpenURL(url);

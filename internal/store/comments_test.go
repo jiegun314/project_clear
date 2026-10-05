@@ -137,7 +137,6 @@ func TestOpenMigratesLegacyTablesWithoutComments(t *testing.T) {
 		t.Fatalf("legacy row: %v", err)
 	}
 	weekCodes, _ := json.Marshal([]string{"2639"})
-	names, _ := json.Marshal(indexNames())
 	if _, err := legacy.Exec(
 		`INSERT INTO archive(week_code, week_start, week_codes, index_names, row_count,
 		                     file_count, committed_at, table_name)
@@ -145,7 +144,6 @@ func TestOpenMigratesLegacyTablesWithoutComments(t *testing.T) {
 		string(weekCodes)); err != nil {
 		t.Fatalf("archive row: %v", err)
 	}
-	_ = names
 	if err := legacy.Close(); err != nil {
 		t.Fatalf("close legacy: %v", err)
 	}

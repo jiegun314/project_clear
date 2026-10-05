@@ -183,24 +183,6 @@ func ParseCFRowsFrom(sheetXML []byte, fromRow int) (map[int]CFRow, error) {
 	return out, nil
 }
 
-// HasDataAreaCF reports whether the document contains conditional formats that
-// touch the data rows, i.e. whether rewriting is required at all.
-func HasDataAreaCF(sheetXML []byte) bool {
-	for _, blk := range extractElements(string(sheetXML), cfOpenTag, cfCloseTag) {
-		sqref, err := attrValue(blk.attrs, "sqref")
-		if err != nil {
-			continue
-		}
-		for _, part := range strings.Fields(sqref) {
-			_, r1, _, _, err := parseRangeRef(part)
-			if err == nil && r1 >= FirstDataRow {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // rawRule is a <cfRule> as written in the source, before row rebasing.
 type rawRule struct {
 	head     string
@@ -271,6 +253,21 @@ func extractFormulas(body string) ([]string, error) {
 	}
 }
 
+// copyStringLiteral copies a "..." run starting at i and returns the index just
+// past it. The text inside a formula string is data, not a formula, so it must
+// never be scanned for references or for row tokens.
+func copyStringLiteral(runes []rune, i int, sb *strings.Builder) int {
+	j := i + 1
+	for j < len(runes) && runes[j] != '"' {
+		j++
+	}
+	if j < len(runes) {
+		j++
+	}
+	sb.WriteString(string(runes[i:j]))
+	return j
+}
+
 // rebaseRefs rewrites cell references so row numbers become offsets from
 // anchorRow. Absolute row references (P$181, $DN$56) are preserved verbatim.
 func rebaseRefs(formula string, anchorRow int) (string, []int, error) {
@@ -281,15 +278,7 @@ func rebaseRefs(formula string, anchorRow int) (string, []int, error) {
 		if runes[i] == '"' {
 			// Copy string literals verbatim so their contents are never
 			// mistaken for references.
-			j := i + 1
-			for j < len(runes) && runes[j] != '"' {
-				j++
-			}
-			if j < len(runes) {
-				j++
-			}
-			sb.WriteString(string(runes[i:j]))
-			i = j
+			i = copyStringLiteral(runes, i, &sb)
 			continue
 		}
 		ref, next, ok := scanRef(runes, i)
@@ -299,10 +288,19 @@ func rebaseRefs(formula string, anchorRow int) (string, []int, error) {
 			continue
 		}
 		if ref.rowAbsolute {
-			// An absolute row must travel with the sheet, not stay put: the
-			// export drops the rows above the header, so $DN$56 has to become
-			// $DN$2. Store the row as a token and resolve it at render time.
-			sb.WriteString(ref.colAbs + ref.col + "$" + absRowToken + strconv.Itoa(ref.row))
+			if ref.row < HeaderRow {
+				// The row lives in the block the export drops, so it has no
+				// destination: keep it as written rather than turning it into a
+				// row that would not exist (row 1 minus the dropped rows is a
+				// negative row, which Excel refuses to open).
+				sb.WriteString(ref.colAbs + ref.col + "$" + strconv.Itoa(ref.row))
+			} else {
+				// An absolute row must travel with the sheet, not stay put: the
+				// export drops the rows above the header, so $DN$56 has to
+				// become $DN$2. Store the row as a token and resolve it at
+				// render time.
+				sb.WriteString(ref.colAbs + ref.col + "$" + absRowToken + strconv.Itoa(ref.row))
+			}
 		} else {
 			d := ref.row - anchorRow
 			deltas = append(deltas, d)
@@ -326,6 +324,12 @@ func resolveRowRefs(stored string, newRow int) string {
 	var sb strings.Builder
 	runes := []rune(stored)
 	for i := 0; i < len(runes); {
+		if runes[i] == '"' {
+			// A literal may contain something that looks like a token; it is
+			// data and must be copied through untouched.
+			i = copyStringLiteral(runes, i, &sb)
+			continue
+		}
 		if runes[i] == '#' && i+1 < len(runes) && (runes[i+1] == 'o' || runes[i+1] == 'a') {
 			kind := runes[i+1]
 			j := i + 2
@@ -371,6 +375,12 @@ func shiftLiteralRows(formula string) string {
 	var sb strings.Builder
 	runes := []rune(formula)
 	for i := 0; i < len(runes); {
+		if runes[i] == '"' {
+			// An absolute row written inside a string literal is text, not a
+			// reference, so it must not be shifted.
+			i = copyStringLiteral(runes, i, &sb)
+			continue
+		}
 		ref, next, ok := scanRef(runes, i)
 		if ok && ref.rowAbsolute && ref.row >= HeaderRow {
 			sb.WriteString(ref.colAbs + ref.col + "$" + strconv.Itoa(ref.row-DropRows))
@@ -594,8 +604,15 @@ func StripAllCF(sheetXML []byte) []byte {
 func CloneCFRow(in CFRow) CFRow {
 	out := CFRow{Blocks: make([]CFBlock, len(in.Blocks))}
 	for i, b := range in.Blocks {
-		out.Blocks[i] = CFBlock{C1: b.C1, C2: b.C2, Rules: make([]CFRule, len(b.Rules))}
-		copy(out.Blocks[i].Rules, b.Rules)
+		rules := make([]CFRule, len(b.Rules))
+		for j, r := range b.Rules {
+			// The struct copy would share these two backing arrays, so a change
+			// made through the clone would reach the original.
+			r.Formulas = append([]string(nil), r.Formulas...)
+			r.Offsets = append([]int(nil), r.Offsets...)
+			rules[j] = r
+		}
+		out.Blocks[i] = CFBlock{C1: b.C1, C2: b.C2, Rules: rules}
 	}
 	return out
 }

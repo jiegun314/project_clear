@@ -93,6 +93,17 @@ type FileResult struct {
 	RowsTotal int        `json:"rowsTotal"`
 	RowsKept  int        `json:"rowsKept"`
 	Err       string     `json:"err,omitempty"`
+	// Warnings lists the visual detail that could not be read. The data is still
+	// usable, but a missing colour or note has to be visible somewhere: the
+	// alternative is a grid and an export that are quietly wrong. The package
+	// reports them instead of logging, so it stays free of application
+	// dependencies and the caller decides where they surface.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// warn records a detail that could not be read.
+func (f *FileResult) warn(format string, args ...any) {
+	f.Warnings = append(f.Warnings, fmt.Sprintf(format, args...))
 }
 
 // ReadOptions controls what a read keeps.
@@ -145,7 +156,9 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 	cfByRow, err := readSheetCFRows(path)
 	if err != nil {
 		// Missing conditional formats is a cosmetic loss, not a reason to
-		// reject the data.
+		// reject the data — but it is the only source of the signal colours, so
+		// it must not pass unmentioned.
+		res.warn("条件格式读取失败（颜色将缺失）: %v", err)
 		cfByRow = map[int]CFRow{}
 	}
 	// Each workbook numbers its own <dxf> records. Keep the file-local table
@@ -154,7 +167,13 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 	var dxfColors map[int]string
 	var dxfs []string
 	if opt.Dxf != nil {
-		if styles, err := zipPart(path, "xl/styles.xml"); err == nil {
+		styles, err := zipPart(path, "xl/styles.xml")
+		if err != nil {
+			// Without this table the file-local dxf ids cannot be renumbered for
+			// the batch, and a rule's id may then resolve to another workbook's
+			// colour: a wrong colour with nothing to show for it.
+			res.warn("样式表读取失败（条件格式配色无法重编号，颜色可能不正确）: %v", err)
+		} else {
 			dxfs = ParseDxfs(styles)
 			dxfColors = DxfFillColors(dxfs)
 		}
@@ -162,6 +181,7 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 
 	commentsByRow, err := readComments(path, SheetName)
 	if err != nil {
+		res.warn("批注读取失败（批注将缺失）: %v", err)
 		commentsByRow = map[int]CommentMap{}
 	}
 
@@ -169,10 +189,12 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 	// rest empty; the planner needs to see it on every row the merge covers
 	// (MFG CLASS CODE and friends are merged across a whole item block).
 	var merges []MergeRange
-	if part, err := SheetPartPath(path, SheetName); err == nil {
-		if raw, err := zipPart(path, part); err == nil {
-			merges = ParseMergeRanges(raw)
-		}
+	if part, err := SheetPartPath(path, SheetName); err != nil {
+		res.warn("定位工作表失败（合并单元格内容不会补齐）: %v", err)
+	} else if raw, err := zipPart(path, part); err != nil {
+		res.warn("读取工作表失败（合并单元格内容不会补齐）: %v", err)
+	} else {
+		merges = ParseMergeRanges(raw)
 	}
 	filler := newMergeFiller(merges)
 
@@ -192,6 +214,7 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 	defer vr.Close()
 
 	styleIdxCache := map[int]int{}
+	styleFailures := 0
 	// Every row's cells, kept for the conditional-format evaluation below: the
 	// rules compare a cell with the row two below it, which a forward-only pass
 	// has not seen yet.
@@ -240,16 +263,19 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 			ax := CellRef(c, rowNum)
 			sid, err := f.GetCellStyle(SheetName, ax)
 			if err != nil {
+				styleFailures++
 				continue
 			}
 			interned, ok := styleIdxCache[sid]
 			if !ok {
 				st, err := f.GetStyle(sid)
 				if err != nil {
+					styleFailures++
 					continue
 				}
 				interned, err = opt.Dict.InternStyle(st)
 				if err != nil {
+					styleFailures++
 					continue
 				}
 				styleIdxCache[sid] = interned
@@ -263,6 +289,9 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 	if err != nil {
 		res.Err = fmt.Sprintf("读取数据行失败: %v", err)
 		return res, nil
+	}
+	if styleFailures > 0 {
+		res.warn("有 %d 个单元格的样式无法读取，这些格子将按无样式处理", styleFailures)
 	}
 	applyCFColors(res.Rows, header, allCells, total, dxfColors, f)
 	// The stored program must reference the batch-wide dxf ids, and the rows

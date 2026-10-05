@@ -239,9 +239,11 @@ func attrInt(t xml.StartElement, name string) int {
 	return n
 }
 
-// columnOf converts an A1-style reference to a 1-based column number.
+// columnOf converts an A1-style reference to a 1-based column number. Excel
+// writes references in upper case, but a lower-case one is still a valid
+// reference and must not be dropped silently.
 func columnOf(ref string) (int, error) {
-	ref = strings.TrimPrefix(strings.TrimSpace(ref), "$")
+	ref = strings.ToUpper(strings.TrimPrefix(strings.TrimSpace(ref), "$"))
 	if ref == "" {
 		return 0, fmt.Errorf("空引用")
 	}

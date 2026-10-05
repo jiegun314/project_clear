@@ -34,6 +34,10 @@ func main() {
 		BackgroundColour:  &options.RGBA{R: 244, G: 244, B: 245, A: 1},
 		OnStartup:         app.startup,
 		OnDomReady:        app.domReady,
+		// Closing the window or quitting goes through here, so the database is
+		// released and the log stream stops even when the user never presses
+		// the 退出 button.
+		OnShutdown: app.shutdown,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			// 内置素材（见 easteregg.go）从二进制里取，磁盘上没有对应文件。

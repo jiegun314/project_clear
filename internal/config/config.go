@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -169,21 +168,41 @@ func NewStoreAt(dir string) (*Store, []string, error) {
 	if err != nil {
 		return nil, notes, fmt.Errorf("读取参数文件失败: %w", err)
 	}
+	malformed := false
 	if err := yaml.Unmarshal(raw, &s.cfg); err != nil {
 		// A malformed file must not brick the app: fall back to defaults and
-		// tell the user which file is at fault.
+		// tell the user which file is at fault. The file itself is left as it
+		// is, so whatever the user was writing is not thrown away.
 		notes = append(notes, fmt.Sprintf("参数文件解析失败(%v)，已回退到默认参数: %s", err, path))
 		s.cfg = Default()
+		malformed = true
 	}
+	// The file is rewritten only when its contents had to change: a version
+	// migration, or a value Validate had to correct. Without the second case an
+	// out-of-range value is clamped in memory and reported again on every
+	// launch, while the file on disk keeps the value that caused it.
+	rewrite := false
 	if note, changed := migrateConfig(&s.cfg); changed {
-		notes = append(notes, note)
+		// Advancing the version marker is not itself worth reporting: the only
+		// migration that has anything to say is the export-mode default. A file
+		// that already carried the new default therefore produced an empty note,
+		// which the settings dialog rendered as a blank bullet.
+		if strings.TrimSpace(note) != "" {
+			notes = append(notes, note)
+		}
+		rewrite = true
+	}
+	if fixed := s.cfg.Validate(); len(fixed) > 0 {
+		notes = append(notes, fixed...)
+		rewrite = true
+	}
+	if rewrite && !malformed {
 		if data, err := yaml.Marshal(s.cfg); err == nil {
 			if err := os.WriteFile(path, data, 0o644); err != nil {
-				notes = append(notes, fmt.Sprintf("保存升级后的参数失败: %v", err))
+				notes = append(notes, fmt.Sprintf("保存修正后的参数失败: %v", err))
 			}
 		}
 	}
-	notes = append(notes, s.cfg.Validate()...)
 	return s, notes, nil
 }
 
@@ -215,6 +234,12 @@ func (s *Store) Get() Config {
 // any corrections that were applied.
 func (s *Store) Save(c Config) ([]string, error) {
 	notes := c.Validate()
+	// What the application writes is always in its own current format, so the
+	// marker has to say so. Trusting the caller's value let a stale or
+	// hand-edited 0 through, which re-armed the version-2 migration on the next
+	// launch and silently reverted a deliberate 「原文件格式」 choice to
+	// 「纯数据」.
+	c.ConfigVersion = currentConfigVersion
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return notes, fmt.Errorf("序列化参数失败: %w", err)
@@ -417,5 +442,3 @@ func DataDir() (string, error) {
 	}
 	return dir, nil
 }
-
-var _ = runtime.GOOS

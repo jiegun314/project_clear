@@ -131,7 +131,7 @@ func TestExportWithoutWeekFollowsTheGrid(t *testing.T) {
 	assertComment(t, staged, "P4", "PO 9578 & 9579 receipts", "Alice")
 
 	// 2. after 整合, with the staging batch promoted.
-	if _, err := svc.Commit(); err != nil {
+	if _, _, err := svc.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	committed := filepath.Join(dir, "committed.xlsx")
@@ -154,7 +154,7 @@ func TestExportNamedWeek(t *testing.T) {
 	if _, err := svc.ImportFolder(writeSourceFolder(t), nil); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if _, err := svc.Commit(); err != nil {
+	if _, _, err := svc.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	dest := filepath.Join(dir, "named.xlsm")
@@ -173,7 +173,7 @@ func TestTemplateExportKeepsOnlyMPS(t *testing.T) {
 	if _, err := svc.ImportFolder(writeSourceFolder(t), nil); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if _, err := svc.Commit(); err != nil {
+	if _, _, err := svc.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	dest := filepath.Join(dir, "original.xlsm")

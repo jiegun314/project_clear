@@ -531,7 +531,6 @@ func roundTo(v float64, digits int) float64 {
 // resolveRef turns a stored reference such as "P#o2", "P$#a181" or "$DN$56"
 // into a concrete (row, col). anchorRow is the row the formula was captured on.
 func resolveRef(token string, anchorRow, anchorCol int) (row, col int, ok bool) {
-	colAbs := strings.HasPrefix(token, "$")
 	t := strings.TrimPrefix(token, "$")
 	i := 0
 	for i < len(t) && unicode.IsLetter(rune(t[i])) {
@@ -546,7 +545,6 @@ func resolveRef(token string, anchorRow, anchorCol int) (row, col int, ok bool) 
 	if err != nil {
 		return 0, 0, false
 	}
-	_ = colAbs
 	switch {
 	case strings.HasPrefix(rest, offsetToken):
 		d, err := strconv.Atoi(rest[len(offsetToken):])

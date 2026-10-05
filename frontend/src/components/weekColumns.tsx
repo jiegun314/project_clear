@@ -3,6 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { MessageSquare } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { formatQuantity, formatWeekStart, rawValueHint, weekDecimals } from '../lib/format';
+import { weekSortKey } from '../lib/sortKeys';
 import { WEEK_WIDTH } from '../lib/gridWidth';
 import type { GridRow, Week } from '../types';
 
@@ -32,7 +33,7 @@ export function buildWeekColumns(
       </div>
     ),
     dataIndex: ['weeks', i],
-    key: `w${w.code}`,
+    key: weekSortKey(w.code),
     width: WEEK_WIDTH,
     align: 'right' as const,
     // The source cell's own fill colour is carried through the database, so a
@@ -95,9 +96,4 @@ export function buildWeekColumns(
       );
     },
   }));
-}
-
-/** Total pixel width of the week block, for the table's horizontal scroll. */
-export function weekBlockWidth(weeks: Week[]): number {
-  return weeks.length * WEEK_WIDTH;
 }

@@ -68,7 +68,6 @@ func (s *Store) sourceSQL(q Query) (table string, staging bool, weekCodes []stri
 		if !sum.HasStaging {
 			return "", false, nil, nil, fmt.Errorf("没有临时数据")
 		}
-		SetStagingWeekOrder(sum.WeekCodes)
 		return "stg_row", true, sum.WeekCodes, sum.IndexNames, nil
 	}
 	code, err := mustWeek(q.Source)
@@ -88,25 +87,23 @@ func (s *Store) sourceSQL(q Query) (table string, staging bool, weekCodes []stri
 // weekExpr is the SQL expression for a week cell. Committed tables have a real
 // column; the staging area keeps weeks in one JSON array, so the value is
 // pulled out with json_extract and cast, which still sorts numerically.
-func weekExpr(staging bool, code string) string {
+//
+// The week order is passed in rather than read from package state: it belongs to
+// one query, and a package-level copy could be replaced by a concurrent import
+// between being set and being read, which would decode the array with another
+// batch's column order.
+func weekExpr(staging bool, code string, weekCodes []string) string {
 	col := WeekColumnName(code)
 	if !staging {
 		return quoteIdent(col)
 	}
-	for i, wc := range stagingWeekOrder {
+	for i, wc := range weekCodes {
 		if wc == code {
 			return fmt.Sprintf("CAST(json_extract(weeks, '$[%d]') AS REAL)", i)
 		}
 	}
 	return "NULL"
 }
-
-// stagingWeekOrder is the week order used to decode the staging JSON array.
-var stagingWeekOrder []string
-
-// SetStagingWeekOrder tells the query layer how the staging JSON array is laid
-// out. It is set once per staging batch.
-func SetStagingWeekOrder(codes []string) { stagingWeekOrder = codes }
 
 // sortColumn validates a sort target against the columns that actually exist,
 // so a crafted request cannot reach SQL as a raw identifier.
@@ -130,7 +127,7 @@ func sortColumn(field string, weekCodes []string, staging bool) string {
 		code := strings.TrimPrefix(field, "wk_")
 		for _, wc := range weekCodes {
 			if wc == code {
-				return weekExpr(staging, code)
+				return weekExpr(staging, code, weekCodes)
 			}
 		}
 	}
@@ -173,7 +170,7 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 		if !ValidWeekCode(code) {
 			continue
 		}
-		col := weekExpr(staging, code)
+		col := weekExpr(staging, code, weekCodes)
 		op, value, ok := splitCondition(cond)
 		if !ok {
 			continue
@@ -228,7 +225,7 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 
 	out := &GridResult{Rows: []GridRow{}, Total: total, Page: page, PageSize: size}
 	for rows.Next() {
-		gr, err := scanGridRow(rows, staging, weekCodes, colors)
+		gr, err := s.scanGridRow(rows, staging, weekCodes, colors)
 		if err != nil {
 			return nil, err
 		}
@@ -255,7 +252,7 @@ func columnList(staging bool, weekCodes []string) string {
 	return strings.Join(cols, ",")
 }
 
-func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[int]string) (GridRow, error) {
+func (s *Store) scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[int]string) (GridRow, error) {
 	var gr GridRow
 	seq := &gr.Seq
 	scans := make([]any, 0, 4+mps.IndexCols+len(weekCodes))
@@ -287,7 +284,7 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[in
 	gr.Weeks = make([]string, len(weekCodes))
 	if staging {
 		var values []string
-		_ = json.Unmarshal([]byte(weeksJSON.String), &values)
+		s.decodeJSON("周数据", weeksJSON.String, &values)
 		for i := range gr.Weeks {
 			if i < len(values) {
 				gr.Weeks[i] = values[i]
@@ -298,7 +295,7 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[in
 			gr.Weeks[i] = nullToCell(v)
 		}
 	}
-	gr.WeekMeta = buildWeekMeta(weekCodes, styleJSON.String, commentsJSON.String, cfColorsJSON.String, colors)
+	gr.WeekMeta = s.buildWeekMeta(weekCodes, styleJSON.String, commentsJSON.String, cfColorsJSON.String, colors)
 	gr.FileName = fileName.String
 	gr.SrcRow = int(srcRow.Int64)
 	return gr, nil
@@ -307,21 +304,15 @@ func scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[in
 // buildWeekMeta aligns the row's interned style ids and its notes with the week
 // columns. Both are stored against absolute column numbers, so the week at
 // index i corresponds to entry FirstWeekCol-1+i.
-func buildWeekMeta(weekCodes []string, styleJSON, commentsJSON, cfColorsJSON string, colors map[int]string) []CellMeta {
+func (s *Store) buildWeekMeta(weekCodes []string, styleJSON, commentsJSON, cfColorsJSON string, colors map[int]string) []CellMeta {
 	var styleIDs []int
-	if styleJSON != "" {
-		_ = json.Unmarshal([]byte(styleJSON), &styleIDs)
-	}
+	s.decodeJSON("单元格样式", styleJSON, &styleIDs)
 	var comments mps.CommentMap
-	if commentsJSON != "" {
-		_ = json.Unmarshal([]byte(commentsJSON), &comments)
-	}
+	s.decodeJSON("批注", commentsJSON, &comments)
 	// 条件格式算出来的颜色优先于静态填充色：Excel 里看到的信号色（红/黄/蓝/绿）
 	// 来自条件格式，只有没有命中规则时才回落到单元格本身的底色。
 	var cfColors []string
-	if cfColorsJSON != "" {
-		_ = json.Unmarshal([]byte(cfColorsJSON), &cfColors)
-	}
+	s.decodeJSON("条件格式颜色", cfColorsJSON, &cfColors)
 	out := make([]CellMeta, len(weekCodes))
 	for i := range weekCodes {
 		col := mps.FirstWeekCol + i
@@ -486,10 +477,10 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 		r.FileName = fileName.String
 		r.SourceRow = int(srcRow.Int64)
 		if styleJSON.Valid && styleJSON.String != "" {
-			_ = json.Unmarshal([]byte(styleJSON.String), &r.StyleIDs)
+			s.decodeJSON("单元格样式", styleJSON.String, &r.StyleIDs)
 		}
 		if commentsJSON.Valid && commentsJSON.String != "" {
-			_ = json.Unmarshal([]byte(commentsJSON.String), &r.Comments)
+			s.decodeJSON("批注", commentsJSON.String, &r.Comments)
 		}
 		if cfID.Valid {
 			if payload, ok := cfPatterns[cfID.Int64]; ok {
@@ -554,16 +545,16 @@ func (s *Store) FetchStagingExportRows() (*StagingSummary, []ExportRow, error) {
 			r.Index[i] = texts[i].String
 		}
 		var weeks []string
-		_ = json.Unmarshal([]byte(weeksJSON), &weeks)
+		s.decodeJSON("周数据", weeksJSON, &weeks)
 		r.Weeks = make([]any, len(sum.WeekCodes))
 		for i := range r.Weeks {
 			if i < len(weeks) {
 				r.Weeks[i] = weekValue(weeks[i])
 			}
 		}
-		_ = json.Unmarshal([]byte(styleJSON), &r.StyleIDs)
+		s.decodeJSON("单元格样式", styleJSON, &r.StyleIDs)
 		if commentsJSON.Valid && commentsJSON.String != "" {
-			_ = json.Unmarshal([]byte(commentsJSON.String), &r.Comments)
+			s.decodeJSON("批注", commentsJSON.String, &r.Comments)
 		}
 		if cfID.Valid {
 			if payload, ok := cfPatterns[cfID.Int64]; ok {
@@ -587,5 +578,3 @@ func decodeWeekCell(raw []byte) any {
 	}
 	return string(raw)
 }
-
-var _ = json.Marshal

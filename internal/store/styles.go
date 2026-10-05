@@ -32,16 +32,6 @@ func (s *Store) LoadStyles() ([]StyleEntry, error) {
 	return out, rows.Err()
 }
 
-// CFPattern returns a stored conditional-format program.
-func (s *Store) CFPattern(id int64) (string, error) {
-	var p string
-	err := s.db.QueryRow(`SELECT payload FROM cf_pattern WHERE id=?`, id).Scan(&p)
-	if err == nil {
-		return p, nil
-	}
-	return "", err
-}
-
 // DxfStyle is one stored differential format: the id rules refer to, and the
 // <dxf> block itself.
 type DxfStyle struct {
@@ -96,25 +86,6 @@ type Template struct {
 	SrcName    string
 	StoredPath string
 	CreatedAt  string
-}
-
-// SaveTemplate registers a stored template copy.
-func (s *Store) SaveTemplate(weekCode, srcName, storedPath string) (*Template, error) {
-	// One template per week: a later batch for the same week replaces it.
-	if _, err := s.db.Exec(`DELETE FROM template WHERE week_code=?`, weekCode); err != nil {
-		return nil, err
-	}
-	res, err := s.db.Exec(
-		`INSERT INTO template(week_code, src_name, stored_path, created_at) VALUES(?,?,?,?)`,
-		weekCode, srcName, storedPath, Now())
-	if err != nil {
-		return nil, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	return &Template{ID: id, WeekCode: weekCode, SrcName: srcName, StoredPath: storedPath, CreatedAt: Now()}, nil
 }
 
 // TemplateFor returns the stored template for a week.

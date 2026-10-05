@@ -71,18 +71,9 @@ export const theme: ThemeConfig = {
       cellPaddingInline: 10,
       headerBorderRadius: 0,
     },
-    Tabs: {
-      itemColor: JNJ.text,
-      itemSelectedColor: JNJ.red,
-      itemHoverColor: JNJ.redHover,
-      inkBarColor: JNJ.red,
-    },
     Modal: {
       titleFontSize: 16,
       headerBg: JNJ.surface,
-    },
-    Card: {
-      headerFontSize: 14,
     },
     Segmented: {
       itemSelectedBg: JNJ.red,
@@ -99,12 +90,4 @@ export const theme: ThemeConfig = {
       optionSelectedBg: JNJ.redSoft,
     },
   },
-};
-
-/** The red used for module titles: red plate, white lettering. */
-export const moduleTitleStyle: React.CSSProperties = {
-  background: JNJ.red,
-  color: '#FFFFFF',
-  fontWeight: 600,
-  letterSpacing: 0.5,
 };

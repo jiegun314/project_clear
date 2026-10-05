@@ -69,6 +69,14 @@ type Service struct {
 
 // New wires the service to its database, log and configuration.
 func New(cfg *config.Store, log *logging.Logger, db *store.Store, dataDir string) *Service {
+	// A stored payload the store cannot decode leaves its field empty rather than
+	// failing the query, and says so here. Without it a missing colour or note is
+	// reported nowhere at all.
+	if log != nil {
+		db.SetWarn(func(format string, args ...any) {
+			log.Warn("数据库", format, args...)
+		})
+	}
 	return &Service{
 		cfg:         cfg,
 		log:         log,
@@ -77,9 +85,6 @@ func New(cfg *config.Store, log *logging.Logger, db *store.Store, dataDir string
 		templateDir: filepath.Join(dataDir, "templates"),
 	}
 }
-
-// DataDir is the folder holding the database, templates and logs.
-func (s *Service) DataDir() string { return s.dataDir }
 
 // ImportFolder reads every workbook in a folder.
 func (s *Service) ImportFolder(dir string, progress Progress) (*ImportResult, error) {
@@ -306,16 +311,21 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 			RowsTotal: fr.RowsTotal, RowsKept: fr.RowsKept, WeekCode: fr.Header.FirstWeekCode(),
 		})
 
+		// What the reader could not reproduce (a missing colour table, an
+		// unreadable annotation) is a property of this file, so it is named here
+		// rather than degrading the whole batch silently.
+		for _, w := range fr.Warnings {
+			s.log.Warn("读取", "%s: %s", name, w)
+			res.Warnings = append(res.Warnings, name+": "+w)
+		}
+
 		// The first workbook that reads cleanly also becomes the export
-		// template, so the exported file looks like a real MPS report.
+		// template, so the exported file looks like a real MPS report. The copy
+		// itself is taken after the staging write succeeds (below): doing it here
+		// meant a failed write left a folder on disk with no record of it.
 		if templateSrc == "" && !templateReady {
-			if err := s.storeTemplate(fr.Header.FirstWeekCode(), p); err != nil {
-				s.log.Warn("模板", "保存导出模板失败: %v", err)
-				res.Warnings = append(res.Warnings, "保存导出模板失败: "+err.Error())
-			} else {
-				templateSrc = p
-				templateReady = true
-			}
+			templateSrc = p
+			templateReady = true
 		}
 	}
 
@@ -344,16 +354,28 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 		TemplateNam: filepath.Base(templateSrc),
 		ParamSnap:   string(snap),
 	}
+	var result *store.StagingResult
 	var writeErr error
 	if opts.merge {
-		_, writeErr = s.db.MergeStaging(input, opts.replace)
+		result, writeErr = s.db.MergeStaging(input, opts.replace)
 	} else {
-		_, writeErr = s.db.SaveStaging(input)
+		result, writeErr = s.db.SaveStaging(input)
 	}
 	if writeErr != nil {
 		s.log.Error("临时数据", "写入失败: %v", writeErr)
 		return nil, writeErr
 	}
+
+	// Only now that the batch is recorded is the template copy worth taking.
+	if templateSrc != "" {
+		if err := s.storeTemplate(res.WeekCode, templateSrc); err != nil {
+			s.log.Warn("模板", "保存导出模板失败: %v", err)
+			res.Warnings = append(res.Warnings, "保存导出模板失败: "+err.Error())
+		}
+	}
+	// A superseded week's template row is gone; its file copy has to follow,
+	// otherwise the folder stays on disk with nothing pointing at it.
+	s.dropOrphanedTemplates(result)
 
 	res.DurationMS = time.Since(start).Milliseconds()
 	src := logSource(action)
@@ -418,6 +440,20 @@ func headerDiff(a, b mps.Header) string {
 	return ""
 }
 
+// dropOrphanedTemplates deletes the stored template folders of the weeks whose
+// template row the write removed. A database transaction cannot touch files, so
+// it happens here, once the write has succeeded.
+func (s *Service) dropOrphanedTemplates(res *store.StagingResult) {
+	if res == nil {
+		return
+	}
+	for _, week := range res.OrphanedTemplates {
+		if err := os.RemoveAll(filepath.Join(s.templateDir, week)); err != nil {
+			s.log.Warn("模板", "删除过期导出模板 %s 失败: %v", week, err)
+		}
+	}
+}
+
 // storeTemplate keeps a copy of a source workbook to export from later.
 func (s *Service) storeTemplate(weekCode, src string) error {
 	dir := filepath.Join(s.templateDir, weekCode)
@@ -439,26 +475,36 @@ func (s *Service) storeTemplate(weekCode, src string) error {
 	return nil
 }
 
-// Commit promotes the staged rows into the permanent weekly table.
-func (s *Service) Commit() (*store.ArchiveEntry, error) {
+// Commit promotes the staged rows into the permanent weekly table. The second
+// result reports whether a week with that code was already integrated and has
+// just been replaced.
+//
+// The previous state is read inside the lock: reading it beforehand left a
+// window in which a concurrent import could change what was staged, and the
+// answer would describe a different batch.
+func (s *Service) Commit() (*store.ArchiveEntry, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	sum, err := s.db.LoadStaging()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !sum.HasStaging {
-		return nil, fmt.Errorf("没有待整合的临时数据，请先导入或添加文件")
+		return nil, false, fmt.Errorf("没有待整合的临时数据，请先导入或添加文件")
+	}
+	previous, err := s.db.ArchiveEntryFor(sum.WeekCode)
+	if err != nil {
+		return nil, false, err
 	}
 	entry, err := s.db.Commit(sum.WeekCode)
 	if err != nil {
 		s.log.Error("整合", "失败: %v", err)
-		return nil, err
+		return nil, false, err
 	}
 	s.log.Success("整合", "周码 %s（%s）已入库，共 %d 行，覆盖原有数据",
 		entry.WeekCode, entry.WeekStart, entry.RowCount)
-	return entry, nil
+	return entry, previous != nil, nil
 }
 
 // ClearStaging removes everything an import staged but the user never
@@ -638,10 +684,30 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 	}
 	s.log.Success("导出", "%s → %s（%s，%d 行 × %d 列，条件格式 %d 行，注释 %d 条，宏保留 %v）",
 		weekCode, opt.DestPath, label, stats.Rows, stats.Cols, stats.CFRows, stats.Comments, stats.PreservedVBA)
+	for _, w := range stats.Warnings {
+		s.log.Warn("导出", "%s", w)
+	}
 	if stats.CFRulesDropped > 0 {
 		s.log.Warn("导出", "有 %d 处样式或条件格式因源数据缺失未能还原", stats.CFRulesDropped)
 	}
 	return stats, nil
+}
+
+// exportSource is what an export needs to know about where its rows came from:
+// only the week's identity, not the table it happens to live in.
+//
+// This used to be a store.ArchiveEntry, which forced the staging path to
+// fabricate one carrying the storage-internal table name "stg_row" — a
+// service-layer struct asserting persistence internals purely to satisfy a type.
+type exportSource struct {
+	WeekCode   string
+	WeekCodes  []string
+	IndexNames []string
+}
+
+// sourceOf narrows a stored week entry to what an export needs.
+func sourceOf(e *store.ArchiveEntry) *exportSource {
+	return &exportSource{WeekCode: e.WeekCode, WeekCodes: e.WeekCodes, IndexNames: e.IndexNames}
 }
 
 // resolveExportRows decides what 导出 writes.
@@ -651,12 +717,16 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 // is one, otherwise the newest integrated week. Falling back like this is what
 // keeps the toolbar button working after 整合, when the staging batch has been
 // promoted and no longer counts as staging.
-func (s *Service) resolveExportRows(weekCode string) (*store.ArchiveEntry, []store.ExportRow, error) {
+func (s *Service) resolveExportRows(weekCode string) (*exportSource, []store.ExportRow, error) {
 	if weekCode != "" {
 		if !store.ValidWeekCode(weekCode) {
 			return nil, nil, fmt.Errorf("非法周码 %q", weekCode)
 		}
-		return s.db.FetchExportRows(weekCode)
+		entry, rows, err := s.db.FetchExportRows(weekCode)
+		if err != nil {
+			return nil, nil, err
+		}
+		return sourceOf(entry), rows, nil
 	}
 
 	sum, err := s.db.LoadStaging()
@@ -669,14 +739,10 @@ func (s *Service) resolveExportRows(weekCode string) (*store.ArchiveEntry, []sto
 			return nil, nil, err
 		}
 		s.log.Info("导出", "导出尚未整合的临时数据（周码 %s）", staged.WeekCode)
-		return &store.ArchiveEntry{
+		return &exportSource{
 			WeekCode:   staged.WeekCode,
-			WeekStart:  staged.WeekStart,
 			WeekCodes:  staged.WeekCodes,
 			IndexNames: staged.IndexNames,
-			RowCount:   len(rows),
-			FileCount:  staged.FileOK,
-			TableName:  "stg_row",
 		}, rows, nil
 	}
 
@@ -689,7 +755,11 @@ func (s *Service) resolveExportRows(weekCode string) (*store.ArchiveEntry, []sto
 	}
 	latest := list[0]
 	s.log.Info("导出", "导出已整合的最新一周：%s", latest.WeekCode)
-	return s.db.FetchExportRows(latest.WeekCode)
+	entry, rows, err := s.db.FetchExportRows(latest.WeekCode)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sourceOf(entry), rows, nil
 }
 
 func (s *Service) styleMap() (func(int) (json.RawMessage, bool), error) {
@@ -744,3 +814,77 @@ func copyFile(src, dst string) error {
 // Query is the data-grid read path, re-exported so callers outside the service
 // package (and the end-to-end audit) do not need to import the store.
 func (s *Service) Query(q store.Query) (*store.GridResult, error) { return s.db.QueryRows(q) }
+
+// WaitIdle blocks until any import, commit, clear or export in progress has
+// finished. The application calls it before releasing the database, so a running
+// operation is never left writing to a closed handle.
+func (s *Service) WaitIdle() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+}
+
+// The read side of the service. These deliberately do not take mu: the long part
+// of an import is reading workbooks, and holding the write lock across it would
+// block the status bar and the grid for the whole run. Reads are serialised
+// against writes by the single database connection instead, exactly as before —
+// these wrappers exist so the application does not reach into the store itself.
+func (s *Service) StagingSummary() (*store.StagingSummary, error) { return s.db.LoadStaging() }
+
+func (s *Service) Archive() ([]store.ArchiveEntry, error) { return s.db.ListArchive() }
+
+func (s *Service) ArchiveEntry(weekCode string) (*store.ArchiveEntry, error) {
+	return s.db.ArchiveEntryFor(weekCode)
+}
+
+func (s *Service) BatchFiles() ([]store.StagedFileDetail, string, string, error) {
+	return s.db.CurrentBatchFiles()
+}
+
+func (s *Service) Years() ([]int, error) { return s.db.AvailableYears() }
+
+func (s *Service) Weeks(year int) ([]int, error) { return s.db.WeeksOfYear(year) }
+
+// GridSource is the column layout of one grid source.
+type GridSource struct {
+	HasStaging bool
+	WeekCode   string
+	WeekStart  string
+	WeekCodes  []string
+	IndexNames []string
+}
+
+// GridSource resolves a grid source: the staging area when weekCode is empty,
+// otherwise that committed week. A source with nothing behind it comes back
+// empty rather than as an error, which is what the grid shows before the first
+// import.
+func (s *Service) GridSource(weekCode string) (*GridSource, error) {
+	if weekCode == "" {
+		sum, err := s.db.LoadStaging()
+		if err != nil {
+			return nil, err
+		}
+		if !sum.HasStaging {
+			return &GridSource{}, nil
+		}
+		return &GridSource{
+			HasStaging: true,
+			WeekCode:   sum.WeekCode,
+			WeekStart:  sum.WeekStart,
+			WeekCodes:  sum.WeekCodes,
+			IndexNames: sum.IndexNames,
+		}, nil
+	}
+	entry, err := s.db.ArchiveEntryFor(weekCode)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return &GridSource{}, nil
+	}
+	return &GridSource{
+		WeekCode:   entry.WeekCode,
+		WeekStart:  entry.WeekStart,
+		WeekCodes:  entry.WeekCodes,
+		IndexNames: entry.IndexNames,
+	}, nil
+}

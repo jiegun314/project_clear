@@ -64,6 +64,11 @@ type StagingResult struct {
 	BatchID    int64
 	StyleMap   map[int]int
 	TemplateID sql.NullInt64
+	// OrphanedTemplates lists the week codes whose stored template row this
+	// write removed because their staging area was superseded and they were
+	// never integrated. The caller deletes the matching file copies, which a
+	// database transaction cannot do.
+	OrphanedTemplates []string
 }
 
 // SaveStaging replaces the staging area with a new batch in one transaction,
@@ -88,7 +93,13 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 	defer tx.Rollback()
 
 	// A new import or add supersedes whatever was staged before, but never
-	// touches committed weeks.
+	// touches committed weeks. The superseded batch's export template goes with
+	// it: a template row carries no foreign key to batch, so the cascade does not
+	// reach it and it would otherwise stay behind for good.
+	superseded, err := stagingWeekCodesTx(tx)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.Exec(`DELETE FROM batch WHERE status='staging'`); err != nil {
 		return nil, err
 	}
@@ -120,11 +131,68 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	orphaned, err := dropUnreachableTemplatesTx(tx, superseded, in.WeekCode)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &StagingResult{BatchID: batchID, StyleMap: styleMap, TemplateID: templateID}, nil
+	return &StagingResult{
+		BatchID:           batchID,
+		StyleMap:          styleMap,
+		TemplateID:        templateID,
+		OrphanedTemplates: orphaned,
+	}, nil
+}
+
+// stagingWeekCodesTx lists the week codes of the staging batches a new import is
+// about to supersede, so their export templates can be removed with them.
+func stagingWeekCodesTx(tx *sql.Tx) ([]string, error) {
+	rows, err := tx.Query(`SELECT DISTINCT week_code FROM batch WHERE status='staging'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var weeks []string
+	for rows.Next() {
+		var wc string
+		if err := rows.Scan(&wc); err != nil {
+			return nil, err
+		}
+		weeks = append(weeks, wc)
+	}
+	return weeks, rows.Err()
+}
+
+// dropUnreachableTemplatesTx removes the stored template of every superseded
+// week that was never integrated, and returns those week codes so the caller can
+// delete the file copies too. A committed week keeps its template: exporting it
+// still needs the original workbook, and the archive row is what keeps it
+// reachable.
+//
+// keep is the week being written now. Its template row is managed by
+// storeTemplateTx and must not be touched here.
+func dropUnreachableTemplatesTx(tx *sql.Tx, weeks []string, keep string) ([]string, error) {
+	orphaned := []string{}
+	for _, wc := range weeks {
+		if wc == keep {
+			continue
+		}
+		var committed int
+		if err := tx.QueryRow(`SELECT COUNT(1) FROM archive WHERE week_code=?`, wc).Scan(&committed); err != nil {
+			return nil, err
+		}
+		if committed > 0 {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM template WHERE week_code=?`, wc); err != nil {
+			return nil, err
+		}
+		orphaned = append(orphaned, wc)
+	}
+	return orphaned, nil
 }
 
 // fileCounts summarises what one add/import action produced.
@@ -420,15 +488,6 @@ func hashOf(b []byte) string {
 	return hex.EncodeToString(h[:8])
 }
 
-// indexArgs flattens the fixed A..O index block into bind arguments.
-func indexArgs(idx [mps.IndexCols]string) []any {
-	args := make([]any, mps.IndexCols)
-	for i, v := range idx {
-		args[i] = v
-	}
-	return args
-}
-
 func totalRows(files []StagedFile) int {
 	n := 0
 	for _, f := range files {
@@ -448,6 +507,12 @@ func hasAny(values []string) bool {
 }
 
 func resolveStyleIDsTx(tx *sql.Tx, dict *mps.StyleDict) (map[int]int, error) {
+	// Same guard as resolveDxfIDsTx below: SaveStaging and MergeStaging are
+	// public, and a caller that supplies no dictionary must get an empty mapping
+	// rather than a nil-pointer panic.
+	if dict == nil {
+		return map[int]int{}, nil
+	}
 	mapping := make(map[int]int, dict.Len())
 	for id := 0; id < dict.Len(); id++ {
 		sig, ok := dict.Style(id)
@@ -574,9 +639,8 @@ func (s *Store) LoadStaging() (*StagingSummary, error) {
 		return nil, err
 	}
 	out.HasStaging = true
-	_ = json.Unmarshal([]byte(weekCodes), &out.WeekCodes)
-	SetStagingWeekOrder(out.WeekCodes)
-	_ = json.Unmarshal([]byte(indexNames), &out.IndexNames)
+	s.decodeJSON("周码列表", weekCodes, &out.WeekCodes)
+	s.decodeJSON("索引表头", indexNames, &out.IndexNames)
 	return out, nil
 }
 
@@ -735,6 +799,3 @@ func markFilesClearedTx(tx *sql.Tx, upto int64) error {
 		metaFilesCleared, strconv.FormatInt(upto, 10))
 	return err
 }
-
-var _ = strings.TrimSpace
-var _ = fmt.Sprintf

@@ -164,6 +164,12 @@ func ReplaceParts(workbook string, replacements map[string][]byte) error {
 		if seen[name] {
 			continue
 		}
+		if data == nil {
+			// A nil replacement means "remove this part". A part that was never
+			// in the archive is already gone; appending an empty one would
+			// invent a part where the caller asked for none.
+			continue
+		}
 		w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate})
 		if err != nil {
 			tmp.Close()
@@ -200,7 +206,7 @@ func InjectConditionalFormats(workbook, sheet string, rows map[int]CFRow, lastCo
 	}
 	stripped := StripAllCF(raw)
 	if len(rows) == 0 {
-		return ReplaceParts(workbook, map[string][]byte{part: stripped})
+		return ReplaceParts(workbook, map[string][]byte{part: fixSheetDimension(stripped, lastCol)})
 	}
 
 	prepared := make(map[int]CFRow, len(rows))
@@ -216,7 +222,45 @@ func InjectConditionalFormats(workbook, sheet string, rows map[int]CFRow, lastCo
 	if err != nil {
 		return err
 	}
-	return ReplaceParts(workbook, map[string][]byte{part: []byte(merged)})
+	return ReplaceParts(workbook, map[string][]byte{part: fixSheetDimension([]byte(merged), lastCol)})
+}
+
+// fixSheetDimension points <dimension> at the rows and columns the sheet really
+// holds.
+//
+// Both engines set the used range for the header block before the data is
+// written and neither revisits it afterwards, so the saved workbook would
+// declare a range covering the header alone. Excel recomputes the range when it
+// opens the file, but streaming readers and some downstream tools trust the
+// declaration and stop at the header, showing an empty workbook.
+func fixSheetDimension(doc []byte, lastCol int) []byte {
+	s := string(doc)
+	lastRow := maxRowNumber(s)
+	if lastRow < 1 {
+		return doc
+	}
+	return []byte(rebaseDimension(s, lastCol, lastRow))
+}
+
+// maxRowNumber reports the highest row number present in a sheet part.
+func maxRowNumber(s string) int {
+	last := 0
+	for i := 0; ; {
+		at := strings.Index(s[i:], "<row ")
+		if at < 0 {
+			return last
+		}
+		at += i
+		_, attrs, bodyStart, _, err := openTagEnd(s, at)
+		if err != nil {
+			i = at + len("<row ")
+			continue
+		}
+		if n, err := attrIntFrom(attrs, "r"); err == nil && n > last {
+			last = n
+		}
+		i = bodyStart
+	}
 }
 
 // clipProgram limits a row program to the exported column span and drops rules
@@ -332,15 +376,6 @@ func localName(tag string) string {
 // ZipPartForTest exposes a single zip entry so the end-to-end audit can inspect
 // the bytes this package wrote.
 func ZipPartForTest(workbook, name string) ([]byte, error) { return zipPart(workbook, name) }
-
-// openZip opens a workbook for streaming reads.
-func openZip(path string) (*zip.ReadCloser, error) {
-	zr, err := zip.OpenReader(path)
-	if err != nil {
-		return nil, err
-	}
-	return zr, nil
-}
 
 // openPart returns a reader for one zip entry; the caller closes it.
 func openPart(workbook, name string) (io.ReadCloser, error) {

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"project_clear/internal/mps"
 )
@@ -126,7 +125,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 			idx[i] = idxCells[i].String
 		}
 		var weeks []string
-		_ = json.Unmarshal([]byte(weeksJSON), &weeks)
+		s.decodeJSON("周数据", weeksJSON, &weeks)
 
 		args := make([]any, 0, len(placeholders))
 		args = append(args, seq)
@@ -147,6 +146,15 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		count++
 	}
 	if err := sel2.Err(); err != nil {
+		return nil, err
+	}
+
+	// The staged rows now live in the week table. Keeping the staging copy as
+	// well would leave a second, full copy of every integrated week in the
+	// database and grow it by roughly double each week. Nothing reads them once
+	// the batch is committed: the grid reads data_<week>, and the 已导入文件
+	// list reads batch_file.
+	if _, err := tx.Exec(`DELETE FROM stg_row WHERE batch_id=?`, sum.BatchID); err != nil {
 		return nil, err
 	}
 
@@ -250,8 +258,8 @@ func (s *Store) ListArchive() ([]ArchiveEntry, error) {
 			return nil, err
 		}
 		e.BatchID = batchID.Int64
-		_ = json.Unmarshal([]byte(weekCodes), &e.WeekCodes)
-		_ = json.Unmarshal([]byte(indexNames), &e.IndexNames)
+		s.decodeJSON("周码列表", weekCodes, &e.WeekCodes)
+		s.decodeJSON("索引表头", indexNames, &e.IndexNames)
 		if w, err := mps.ParseWeekCode(e.WeekCode); err == nil {
 			e.Year = w.FullYear()
 			e.WeekNo = w.WeekNo
@@ -283,8 +291,8 @@ func (s *Store) ArchiveEntryFor(weekCode string) (*ArchiveEntry, error) {
 		return nil, err
 	}
 	e.BatchID = batchID.Int64
-	_ = json.Unmarshal([]byte(weekCodes), &e.WeekCodes)
-	_ = json.Unmarshal([]byte(indexNames), &e.IndexNames)
+	s.decodeJSON("周码列表", weekCodes, &e.WeekCodes)
+	s.decodeJSON("索引表头", indexNames, &e.IndexNames)
 	if w, err := mps.ParseWeekCode(e.WeekCode); err == nil {
 		e.Year = w.FullYear()
 		e.WeekNo = w.WeekNo
@@ -325,5 +333,3 @@ func (s *Store) WeeksOfYear(year int) ([]int, error) {
 	sort.Sort(sort.Reverse(sort.IntSlice(out)))
 	return out, nil
 }
-
-var _ = time.Now

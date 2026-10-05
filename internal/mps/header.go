@@ -81,9 +81,6 @@ func (w Week) FullYear() int { return 2000 + w.Year }
 // StartText renders the Monday as YYYY-MM-DD.
 func (w Week) StartText() string { return w.Start.Format("2006-01-02") }
 
-// Label is the single-line form used by the one-row header mode.
-func (w Week) Label() string { return fmt.Sprintf("%s / %s", w.Code, w.StartText()) }
-
 // ParseWeekCode turns a raw header cell into a Week. Codes are 4 digits: the
 // first two are the year offset from 2000, the last two the ISO week number.
 func ParseWeekCode(raw string) (Week, error) {
@@ -173,15 +170,6 @@ func (h Header) FirstWeekCode() string {
 
 // TotalCols is the width of the table we reproduce: index block plus weeks.
 func (h Header) TotalCols() int { return IndexCols + len(h.Weeks) }
-
-// LastColName is the final column letter of the reproduced table.
-func (h Header) LastColName() string {
-	n, err := ColumnName(h.TotalCols())
-	if err != nil {
-		return ""
-	}
-	return n
-}
 
 // ColumnName converts a 1-based column number to its letter.
 func ColumnName(n int) (string, error) {
