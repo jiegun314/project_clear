@@ -100,6 +100,20 @@ func writeSyntheticSource(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 
+	// Row 56's serials are formatted as dates, the way the real report has them
+	// (dd-mmm). A serial without a date format is just a number, so without this
+	// the audit could not tell an exported date from an exported number.
+	dateFmt := "dd-mmm"
+	dateStyle, err := f.NewStyle(&excelize.Style{CustomNumFmt: &dateFmt})
+	if err != nil {
+		t.Fatalf("date style: %v", err)
+	}
+	startCol, _ := mps.ColumnName(mps.FirstWeekCol)
+	if err := f.SetCellStyle(sheet, startCol+strconv.Itoa(mps.DateRow),
+		lastCol+strconv.Itoa(mps.DateRow), dateStyle); err != nil {
+		t.Fatal(err)
+	}
+
 	// Data from row 58. Row L is the LOC filter column.
 	rows := []struct {
 		index []string

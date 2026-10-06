@@ -286,7 +286,23 @@ func (r *Runner) audit(dest, srcDir, weekCode string) error {
 	if serial == "" {
 		return fmt.Errorf("%s 起始日期丢失", dateRef)
 	}
-	r.mark("审计: 表头完整, %s=%s %s=%s (期望 %s)", codeRef, gotCode, dateRef, serial, w.StartText())
+	// The date must still be a date *to look at*: a serial number carrying a date
+	// format. Writing it as text leaves the cell showing the raw serial ("46286"),
+	// because a number format cannot format text — which is what the clean export
+	// did for years. The type is spelled out here rather than taken from the
+	// exporter's own predicate: an audit that asks the code under test what it
+	// meant cannot catch that predicate being wrong.
+	ct, ctErr := f.GetCellType(mps.SheetName, dateRef)
+	switch ct {
+	case excelize.CellTypeUnset, excelize.CellTypeNumber, excelize.CellTypeDate:
+	default:
+		return fmt.Errorf("%s 起始日期不是数值 (type=%v err=%v)：导出后被写成了文本", dateRef, ct, ctErr)
+	}
+	shown, _ := f.GetCellValue(mps.SheetName, dateRef)
+	if strings.TrimSpace(shown) == strings.TrimSpace(serial) {
+		return fmt.Errorf("%s 起始日期显示为 %q，即原始序列号：日期格式没有生效", dateRef, shown)
+	}
+	r.mark("审计: 表头完整, %s=%s %s=%s 显示 %q (期望 %s)", codeRef, gotCode, dateRef, serial, shown, w.StartText())
 
 	// 2. the styled separator row must keep its formatting even though it holds
 	// no values

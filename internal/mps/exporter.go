@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -557,6 +558,23 @@ func clearDataComments(f *excelize.File) {
 //
 // Those live on rows 55..57 of the source and land on rows 1..3 here — the
 // decorative block above them is not part of the data and is left out.
+// isNumericHeaderCell reports whether a source header cell holds a number. A date
+// is a number carrying a date format, so the week dates arrive here numeric too.
+// A cell with no `t` attribute reads back as CellTypeUnset, which is a number;
+// text cells are shared or inline strings and must stay text.
+func isNumericHeaderCell(f *excelize.File, ref string) bool {
+	ct, err := f.GetCellType(SheetName, ref)
+	if err != nil {
+		return false
+	}
+	switch ct {
+	case excelize.CellTypeUnset, excelize.CellTypeNumber, excelize.CellTypeDate:
+		return true
+	default:
+		return false
+	}
+}
+
 func copyHeaderBlock(src, dst *excelize.File, totalCols int) error {
 	res := newStyleResolver(dst)
 	raw, err := src.GetRows(SheetName, excelize.Options{RawCellValue: true})
@@ -567,15 +585,31 @@ func copyHeaderBlock(src, dst *excelize.File, totalCols int) error {
 		raw = raw[:BlankRow]
 	}
 
-	// Values: source row r -> exported row r-DropRows.
+	// Values: source row r -> exported row r-DropRows. The type travels with the
+	// value. Source row 56 holds the week start dates as serial numbers, and
+	// writing those with SetCellStr turned them into text: the row then showed the
+	// raw serial ("46286") in the exported file, because no number format can make
+	// text look like a date. Text cells (the "P5"/"LOC" headers) must stay text, so
+	// only a cell the source calls numeric is written as a number.
 	for r := HeaderRow; r <= len(raw) && r <= BlankRow; r++ {
 		outRow := r - DropRows
 		source := raw[r-1]
 		for c := 1; c <= totalCols && c <= len(source); c++ {
-			if v := source[c-1]; v != "" {
-				if err := dst.SetCellStr(SheetName, CellRef(c, outRow), v); err != nil {
-					return err
+			text := source[c-1]
+			if text == "" {
+				continue
+			}
+			out := CellRef(c, outRow)
+			if isNumericHeaderCell(src, CellRef(c, r)) {
+				if n, err := strconv.ParseFloat(text, 64); err == nil {
+					if err := dst.SetCellFloat(SheetName, out, n, -1, 64); err != nil {
+						return err
+					}
+					continue
 				}
+			}
+			if err := dst.SetCellStr(SheetName, out, text); err != nil {
+				return err
 			}
 		}
 	}
