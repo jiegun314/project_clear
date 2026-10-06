@@ -163,6 +163,12 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		return nil, err
 	}
 
+	// Read the clock once. The row is what the next read returns, so the value
+	// handed back here has to be the same string — reading the clock twice let the
+	// two land either side of a second boundary and disagree (the Windows runner
+	// showed an archive time one second behind the time the caller was told).
+	committedAt := Now()
+
 	weekCodes, _ := json.Marshal(sum.WeekCodes)
 	indexNames, _ := json.Marshal(sum.IndexNames)
 	var paramSnap sql.NullString
@@ -181,7 +187,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		   committed_at=excluded.committed_at, template_id=excluded.template_id,
 		   param_snapshot=excluded.param_snapshot, table_name=excluded.table_name`,
 		code, sum.WeekStart, string(weekCodes), string(indexNames), count, files,
-		sum.BatchID, Now(), nullInt(templateID), paramSnap, table); err != nil {
+		sum.BatchID, committedAt, nullInt(templateID), paramSnap, table); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`UPDATE batch SET status='committed' WHERE id=?`, sum.BatchID); err != nil {
@@ -202,7 +208,7 @@ func (s *Store) Commit(weekCode string) (*ArchiveEntry, error) {
 		RowCount:    count,
 		FileCount:   files,
 		BatchID:     sum.BatchID,
-		CommittedAt: Now(),
+		CommittedAt: committedAt,
 		TableName:   table,
 	}, nil
 }

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 
 	"project_clear/internal/mps"
@@ -124,5 +125,40 @@ func TestReCommitReplacesTheWeekAndRefreshesTheTime(t *testing.T) {
 	}
 	if len(weeks) != 1 || weeks[0] != 39 {
 		t.Errorf("weeks of 2026 = %v, want [39]", weeks)
+	}
+}
+
+// 整合返回的时间必须就是写进归档的那个时间。两次各读一次时钟时，两者只在
+// 恰好跨秒的时候才会不一致——真实运行几乎不会，Windows 的 CI 跑出来了一次。
+// 这里让每次读取都往前走一秒，把"是否同一次读数"变成确定的断言。
+func TestCommitReturnsTheTimeItStored(t *testing.T) {
+	st := openTestStore(t)
+
+	var readings int
+	real := Now
+	Now = func() string {
+		readings++
+		return fmt.Sprintf("2026-01-01 00:00:%02d", readings)
+	}
+	t.Cleanup(func() { Now = real })
+
+	if _, err := st.SaveStaging(stagedBatch(nil)); err != nil {
+		t.Fatalf("save staging: %v", err)
+	}
+	entry, err := st.Commit("2639")
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	list, err := st.ListArchive()
+	if err != nil {
+		t.Fatalf("list archive: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("archive rows = %d, want 1", len(list))
+	}
+	if list[0].CommittedAt != entry.CommittedAt {
+		t.Errorf("归档时间 %q 与返回的 %q 不是同一次读数（共读了 %d 次时钟）",
+			list[0].CommittedAt, entry.CommittedAt, readings)
 	}
 }

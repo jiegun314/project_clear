@@ -315,7 +315,12 @@ func hasColumn(q sqlQueryer, table, column string) (bool, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 // Now returns the timestamp format used across the database.
-func Now() string { return time.Now().Format("2006-01-02 15:04:05") }
+//
+// It is a variable so a test can move the clock: whether a record that was
+// written and the value handed back to the caller came from the *same* reading is
+// otherwise only observable when two readings straddle a second boundary, which a
+// real run almost never does. (A Windows CI runner did, once.)
+var Now = func() string { return time.Now().Format("2006-01-02 15:04:05") }
 
 // ValidWeekCode reports whether a code is safe to interpolate into SQL.
 func ValidWeekCode(code string) bool { return weekCodeRe.MatchString(code) }
