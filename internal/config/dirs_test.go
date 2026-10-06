@@ -9,6 +9,9 @@ import (
 // A macOS bundle must keep its state beside the .app the user launched, not
 // inside the package where nobody looks.
 func TestProgramDirFrom(t *testing.T) {
+	// The paths are written POSIX-style and converted below: programDirFrom goes
+	// through filepath, so on Windows the answer comes back with backslashes and a
+	// POSIX-only expectation would be testing the other operating system's rules.
 	cases := []struct{ exe, want string }{
 		{"/Applications/CLEAR.app/Contents/MacOS/CLEAR", "/Applications"},
 		{"/Users/z/Downloads/CLEAR.app/Contents/MacOS/CLEAR", "/Users/z/Downloads"},
@@ -18,8 +21,9 @@ func TestProgramDirFrom(t *testing.T) {
 		{"/srv/MacOS/CLEAR", "/srv/MacOS"},
 	}
 	for _, c := range cases {
-		if got := programDirFrom(c.exe); got != c.want {
-			t.Errorf("programDirFrom(%q) = %q, want %q", c.exe, got, c.want)
+		exe, want := filepath.FromSlash(c.exe), filepath.FromSlash(c.want)
+		if got := programDirFrom(exe); got != want {
+			t.Errorf("programDirFrom(%q) = %q, want %q", exe, got, want)
 		}
 	}
 }

@@ -73,7 +73,9 @@ func TestVersionAgreesEverywhere(t *testing.T) {
 	}
 	wantStamp := fmt.Sprintf("%x", md5.Sum(pkgRaw))
 	if got := strings.TrimSpace(string(stampRaw)); got != wantStamp {
-		t.Errorf("frontend/package.json.md5 = %q, want md5(package.json) = %q", got, wantStamp)
+		t.Errorf("frontend/package.json.md5 = %q, want md5(package.json) = %q\n"+
+			"(the stamp is the hash of the file as it sits on disk, so a checkout that "+
+			"rewrote its line endings cannot match — see .gitattributes)", got, wantStamp)
 	}
 }
 

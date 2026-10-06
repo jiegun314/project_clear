@@ -1,0 +1,11 @@
+# The stamp beside this file is md5(package.json) exactly as the file sits on
+# disk: wails compares the two to decide whether the frontend dependencies need
+# reinstalling, and the version test asserts they agree.
+#
+# A checkout that rewrites the line endings breaks both — and a Windows checkout
+# did, because Git for Windows converts text files by default. npm writes this
+# file with LF, so that is what is kept everywhere.
+frontend/package.json text eol=lf
+
+# A bare hash, not text: never converted.
+frontend/package.json.md5 -text
