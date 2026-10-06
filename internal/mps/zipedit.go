@@ -182,6 +182,19 @@ func ReplaceParts(workbook string, replacements map[string][]byte) error {
 			return err
 		}
 	}
+	// Everything has been read, so the archive is closed before the temp file
+	// takes its place.
+	//
+	// This is not tidiness. Windows refuses to replace a file that is open, and Go
+	// opens files with FILE_SHARE_READ|FILE_SHARE_WRITE but *without*
+	// FILE_SHARE_DELETE — so our own reader was enough to make the rename below
+	// fail with "Access is denied", reported as 重命名 … 失败. On POSIX the rename
+	// succeeds either way, which is why this only ever appeared on Windows, where
+	// it aborted every export that needed a post-processing pass.
+	if err := zr.Close(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := zw.Close(); err != nil {
 		tmp.Close()
 		return err

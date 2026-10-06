@@ -93,14 +93,34 @@ export function ImportResultModal({ open, result, onClose }: ImportResultModalPr
             title: '状态',
             dataIndex: 'status',
             width: 80,
+            // Centred both ways. antd's `align` is horizontal only, and a table
+            // cell defaults to `vertical-align: baseline` — so a row made tall by
+            // the file column (a name, and an error line under it) used to leave
+            // the chip stranded at the top of its cell.
+            align: 'center',
+            onCell: () => ({ style: { verticalAlign: 'middle' } }),
             filters: [
               { text: '成功', value: 'ok' },
               { text: '失败', value: 'failed' },
             ],
             onFilter: (v, r) => r.status === v,
-            render: (v: string) => (
-              <Tag color={v === 'ok' ? 'success' : 'error'}>{v === 'ok' ? '成功' : '失败'}</Tag>
-            ),
+            render: (v: string) =>
+              v === 'ok' ? (
+                // The preset `color="success"` fills the tag with a pale tint
+                // derived from our own dark green, which reads as grey rather than
+                // as "this worked". The lightest grey fill with the success green
+                // as the text is calmer and plainly readable — and it keeps the
+                // same fill the theme already gives a plain Tag.
+                <Tag style={{ background: JNJ.fill, color: JNJ.success, border: 'none', margin: 0 }}>
+                  成功
+                </Tag>
+              ) : (
+                // `margin: 0` as well: antd's tag margin would push the chip off
+                // centre inside a centred cell.
+                <Tag color="error" style={{ margin: 0 }}>
+                  失败
+                </Tag>
+              ),
           },
           { title: '数据行', dataIndex: 'rowsTotal', width: 90, align: 'right' },
           {

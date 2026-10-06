@@ -95,3 +95,35 @@ jobs:
 
       - name: npm run build
         run: npm run build
+
+  # The export rewrites a workbook in place (write a temp file, then rename it
+  # over the original). Windows cannot replace a file that is open, and Go opens
+  # files without FILE_SHARE_DELETE, so a reader of our own left open across the
+  # rename makes every export fail there — and on macOS/Linux the same code is
+  # perfectly happy. That bug shipped, so the platform is now tested.
+  go-windows:
+    name: Go (tests on Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Same embed target as the Linux job; bash so the one-liner is the same on
+      # both (the Windows runner has Git Bash).
+      - name: provide the embed target
+        shell: bash
+        run: mkdir -p frontend/dist && touch frontend/dist/index.html
+
+      - name: go vet
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./internal/... ./tools/... .
+
+      - name: go test
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./internal/... ./tools/... .
