@@ -23,7 +23,10 @@ const (
 	// HeaderTwoRow renders the week code and its start date on two lines,
 	// mirroring rows 55/56 of the source workbook.
 	HeaderTwoRow HeaderDisplay = "twoRow"
-	// HeaderOneRow renders "2639 / 2026-09-21" on a single line.
+	// HeaderOneRow renders the week code alone, on a single line, for a more
+	// compact header. (It does not carry the start date: that is what the two-row
+	// mode is for. A single-line "code / start" form used to be assembled here for
+	// this mode, but the grid never asked for it and it was removed in v1.6.0.)
 	HeaderOneRow HeaderDisplay = "oneRow"
 )
 

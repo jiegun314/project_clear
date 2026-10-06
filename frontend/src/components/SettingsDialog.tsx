@@ -228,6 +228,24 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
 
         <Section>
           <Form.Item
+            label="表头显示"
+            extra="主表格的周列表头：两行显示周码与起始日期，一行只显示周码"
+            style={{ marginBottom: 0 }}
+          >
+            <Radio.Group
+              value={cfg.headerDisplay}
+              onChange={(e) => setCfg({ ...cfg, headerDisplay: e.target.value })}
+            >
+              <Radio value="twoRow" style={{ marginBottom: 6 }}>
+                两行（默认：周码 + 起始日期）
+              </Radio>
+              <Radio value="oneRow">一行（只有周码，表头更紧凑）</Radio>
+            </Radio.Group>
+          </Form.Item>
+        </Section>
+
+        <Section>
+          <Form.Item
             label="导出方式"
             extra="两种方式都只输出 MPS 页，都保留颜色、条件格式与备注"
             style={{ marginBottom: 0 }}

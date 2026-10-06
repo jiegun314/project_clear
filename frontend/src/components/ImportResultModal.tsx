@@ -115,9 +115,9 @@ export function ImportResultModal({ open, result, onClose }: ImportResultModalPr
                   成功
                 </Tag>
               ) : (
-                // `margin: 0` as well: antd's tag margin would push the chip off
-                // centre inside a centred cell.
-                <Tag color="error" style={{ margin: 0 }}>
+                // Same treatment as 成功, so the pair reads as one design: the
+                // lightest grey fill, with the state's colour as the text.
+                <Tag style={{ background: JNJ.fill, color: JNJ.danger, border: 'none', margin: 0 }}>
                   失败
                 </Tag>
               ),

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SettingsDialog } from './SettingsDialog';
 import type { AppConfig, ConfigView } from '../types';
 
@@ -39,6 +39,23 @@ beforeEach(() => {
   mocked.resetConfig.mockResolvedValue(VIEW);
 });
 
+/** The form item that carries a given label, so radio groups can be told apart. */
+function fieldGroup(label: string): HTMLElement {
+  const item = screen.getByText(label).closest('.ant-form-item');
+  if (!item) throw new Error(`no form item labelled ${label}`);
+  return item as HTMLElement;
+}
+
+/**
+ * Which option a radio group shows as selected, read from the class antd puts on
+ * the chosen option's wrapper. The inner <input>'s `checked` property is not a
+ * reliable signal here (it stays false on a group that is visibly selected).
+ */
+function selected(label: string): string {
+  const chosen = fieldGroup(label).querySelector('.ant-radio-wrapper-checked');
+  return chosen?.textContent?.trim() ?? '';
+}
+
 describe('SettingsDialog', () => {
   it('shows every parameter with the value the backend holds', async () => {
     renderDialog();
@@ -47,6 +64,7 @@ describe('SettingsDialog', () => {
     expect(await screen.findByText('读取列数（从 P 列开始）')).toBeTruthy();
     expect(screen.getByText('LOC 筛选值（L 列）')).toBeTruthy();
     expect(screen.getByText('每页显示行数')).toBeTruthy();
+    expect(screen.getByText('表头显示')).toBeTruthy();
     expect(screen.getByText('导出方式')).toBeTruthy();
 
     // The two numeric controls, in order, with their current values.
@@ -56,9 +74,10 @@ describe('SettingsDialog', () => {
     // The text control.
     expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('WH_CNB');
 
-    // The two export modes, with 纯数据 selected.
-    const radios = screen.getAllByRole('radio') as HTMLInputElement[];
-    expect(radios.map((r) => r.checked)).toEqual([true, false]);
+    // Each radio group holds its own parameter, so they are asserted per field
+    // rather than as one flat list.
+    expect(selected('表头显示')).toContain('两行');
+    expect(selected('导出方式')).toContain('纯数据');
 
     // And the path of the file these are written to.
     expect(screen.getByText(/\/tmp\/config\/clear\.yaml/)).toBeTruthy();
@@ -111,5 +130,15 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('只保留该 LOC 的数据行，留空将回退为 WH_CNB')).toBeTruthy();
     expect(screen.getByText('两种方式都只输出 MPS 页，都保留颜色、条件格式与备注')).toBeTruthy();
   });
-});
+  it('exposes the header display mode, which used to need editing the YAML by hand', async () => {
+    renderDialog();
+    await screen.findByText('读取列数（从 P 列开始）');
 
+    fireEvent.click(within(fieldGroup('表头显示')).getByRole('radio', { name: /一行/ }));
+    fireEvent.click(screen.getByRole('button', { name: SAVE }));
+
+    await waitFor(() =>
+      expect(mocked.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ headerDisplay: 'oneRow' })),
+    );
+  });
+});

@@ -73,11 +73,14 @@ describe('ImportResultModal', () => {
     expect(cell.style.verticalAlign).toBe('middle');
   });
 
-  it('still marks a failed file, in a cell centred the same way', () => {
+  it('draws 失败 the same way, with the danger colour as the text', () => {
     renderModal();
     const chip = chipInTable('失败');
     const cell = chip.closest('td') as HTMLElement;
 
+    expect(chip.style.background).toBe(toRgb(JNJ.fill));
+    expect(chip.style.color).toBe(toRgb(JNJ.danger));
+    expect(chip.style.margin).toBe('0px');
     expect(cell.style.textAlign).toBe('center');
     expect(cell.style.verticalAlign).toBe('middle');
   });

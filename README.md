@@ -100,7 +100,7 @@ wails dev
 
 ```bash
 # 推荐：多一步 Info.plist / 图标的校验，刷新 LaunchServices 缓存，
-# 并打包成 dist/CLEAR-1.6.2-darwin-arm64.zip。
+# 并打包成 dist/CLEAR-1.6.3-darwin-arm64.zip。
 # 它会保住 build/bin/data 与 build/bin/config（见下方注意事项）。
 ./scripts/build-darwin.sh
 
