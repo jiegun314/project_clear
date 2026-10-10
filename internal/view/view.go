@@ -69,7 +69,10 @@ type StagingFilesView struct {
 // ClearStagingResult reports what 清空 removed.
 type ClearStagingResult struct {
 	WeekCode string `json:"weekCode"`
-	Rows     int    `json:"rows"`
+	// Files is how many imported workbooks were discarded — the summary the user
+	// sees after 清空 names the file count as well as the row count.
+	Files int `json:"files"`
+	Rows  int `json:"rows"`
 }
 
 // ExportResult reports the outcome of 导出.

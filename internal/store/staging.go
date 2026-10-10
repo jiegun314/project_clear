@@ -400,6 +400,11 @@ func refreshBatchTotalsTx(tx *sql.Tx, batchID int64) error {
 // overwrites its rows instead of duplicating them. Everything remains one
 // batch, which keeps the staging list, the row count and 整合 working on the
 // merged set. With nothing staged this is exactly SaveStaging.
+//
+// `replace` holds file *names*: re-importing a workbook replaces the entry with
+// the same name no matter which folder this copy came from. Matching on the path
+// instead would let the same report staged from two folders be merged twice,
+// counting its week values twice.
 func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult, error) {
 	sum, err := s.LoadStaging()
 	if err != nil {
@@ -420,26 +425,26 @@ func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult,
 
 	if len(replace) > 0 {
 		ph := make([]string, len(replace))
-		replacedPaths := make([]any, 0, len(replace))
-		for i, p := range replace {
+		replaced := make([]any, 0, len(replace))
+		for i, name := range replace {
 			ph[i] = "?"
-			replacedPaths = append(replacedPaths, p)
+			replaced = append(replaced, name)
 		}
 		list := strings.Join(ph, ",")
-		args := append([]any{sum.BatchID, sum.BatchID}, replacedPaths...)
+		args := append([]any{sum.BatchID, sum.BatchID}, replaced...)
 		if _, err := tx.Exec(fmt.Sprintf(
 			`DELETE FROM stg_row WHERE batch_id=? AND file_id IN
-			   (SELECT id FROM batch_file WHERE batch_id=? AND path IN (%s))`, list), args...); err != nil {
+			   (SELECT id FROM batch_file WHERE batch_id=? AND name IN (%s))`, list), args...); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(fmt.Sprintf(
-			`DELETE FROM stg_row WHERE batch_id=? AND file_id IS NULL AND file_name IN
-			   (SELECT name FROM batch_file WHERE batch_id=? AND path IN (%s))`, list), args...); err != nil {
+			`DELETE FROM stg_row WHERE batch_id=? AND file_id IS NULL AND file_name IN (%s)`, list),
+			append([]any{sum.BatchID}, replaced...)...); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(fmt.Sprintf(
-			`DELETE FROM batch_file WHERE batch_id=? AND path IN (%s)`, list),
-			append([]any{sum.BatchID}, replacedPaths...)...); err != nil {
+			`DELETE FROM batch_file WHERE batch_id=? AND name IN (%s)`, list),
+			append([]any{sum.BatchID}, replaced...)...); err != nil {
 			return nil, err
 		}
 	}

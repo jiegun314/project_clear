@@ -171,6 +171,9 @@ func TestMergeStagingAppendsToTheExistingList(t *testing.T) {
 
 // Re-adding a workbook that is already in the list replaces exactly its own
 // rows: the file count does not grow and the other files stay intact.
+//
+// The replace list holds file *names*, which is what makes the same report staged
+// from a different folder replace its entry instead of merging into it.
 func TestMergeStagingReplacesAReAddedFile(t *testing.T) {
 	st := openTestStore(t)
 
@@ -198,7 +201,7 @@ func TestMergeStagingReplacesAReAddedFile(t *testing.T) {
 	replacement.Rows[0].FilePath = "/src/a.xlsm"
 	replacement.Rows[0].Index[0] = "P5_EP_A2"
 	replacement.Rows[0].Weeks = []string{"999"}
-	if _, err := st.MergeStaging(replacement, []string{"/src/a.xlsm"}); err != nil {
+	if _, err := st.MergeStaging(replacement, []string{"a.xlsm"}); err != nil {
 		t.Fatalf("replace a.xlsm: %v", err)
 	}
 

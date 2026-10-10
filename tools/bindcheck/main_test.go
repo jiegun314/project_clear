@@ -96,7 +96,7 @@ func TestBoundPayloadFieldNamesArePinned(t *testing.T) {
 			"committedAt", "fileCount", "overwrote", "rowCount", "tableName", "weekCode", "weekStart"}},
 		{"StagingFilesView", view.NewStagingFilesView(), []string{
 			"batchState", "failedCount", "fileCount", "files", "hasStaging", "rowCount"}},
-		{"ClearStagingResult", view.ClearStagingResult{}, []string{"rows", "weekCode"}},
+		{"ClearStagingResult", view.ClearStagingResult{}, []string{"files", "rows", "weekCode"}},
 		{"ExportResult", view.ExportResult{}, []string{
 			"cfRows", "cols", "comments", "destPath", "dropped", "durationMs", "mode",
 			"preservedVba", "rows", "sizeBytes", "stylesUsed"}},

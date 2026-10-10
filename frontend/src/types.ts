@@ -74,10 +74,8 @@ export interface ImportResult {
   files: FileResult[];
   warnings: string[];
   durationMs: number;
-  /** 添加 stopped because one of the picked files is already in the list. */
-  needsConfirm?: boolean;
-  duplicateFiles?: string[];
-  pendingPaths?: string[];
+  /** Staged files whose data this action replaced (matched by file name). */
+  replaced?: string[];
 }
 
 /** One workbook of the current 整合清单. */
@@ -115,6 +113,8 @@ export interface CommitResult {
 
 export interface ClearResult {
   weekCode: string;
+  /** How many imported workbooks were discarded. */
+  files: number;
   rows: number;
 }
 

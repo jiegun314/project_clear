@@ -13,9 +13,13 @@ export interface DataGridProps {
   pageSize: number;
   /** Bumped by the parent after an import or commit to force a reload. */
   reloadToken: number;
+  /** The list's name: 数据清单 plus the state suffix, worded by the shell. */
+  title: string;
+  /** Shown when there are no rows; the shell words it from the data state. */
+  emptyText?: string;
 }
 
-export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataGridProps) {
+export function DataGrid({ source, headerDisplay, pageSize, reloadToken, title, emptyText }: DataGridProps) {
   const q = useTableQuery({
     source,
     defaultPageSize: pageSize,
@@ -53,8 +57,6 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
     // Where a row came from, so a value can be traced back to its workbook.
     cellTitle: (row) => (row.fileName ? `${row.fileName} · 源第 ${row.srcRow} 行` : undefined),
   });
-
-  const title = source === '' ? '整合数据（临时）' : `整合数据（周码 ${source}）`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -124,13 +126,17 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
           rows={q.rows}
           columns={columns}
           loading={q.loading}
-          emptyText={source === '' ? '暂无临时数据，请使用工具栏的导入或添加' : '该周暂无数据'}
+          emptyText={emptyText ?? (source === '' ? '暂无临时数据，请使用工具栏的导入或添加' : '该周暂无数据')}
           scrollX={tableWidth}
           scrollY={bodyHeight > 0 ? bodyHeight : 'calc(100vh - 520px)'}
           onChange={q.onTableChange}
         />
       </div>
 
+      {/* 第 0-0 条 / 共 0 条 is noise under an empty list, and its top border is one
+          more line across empty space: with nothing to page through there is no
+          footer at all. */}
+      {q.rows.length > 0 && (
       <div
         style={{
           flex: '0 0 auto',
@@ -156,6 +162,7 @@ export function DataGrid({ source, headerDisplay, pageSize, reloadToken }: DataG
           }}
         />
       </div>
+      )}
     </div>
   );
 }

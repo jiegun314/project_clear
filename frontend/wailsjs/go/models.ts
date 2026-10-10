@@ -135,9 +135,7 @@ export namespace service {
 	    files: FileResult[];
 	    warnings: string[];
 	    durationMs: number;
-	    needsConfirm?: boolean;
-	    duplicateFiles?: string[];
-	    pendingPaths?: string[];
+	    replaced?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ImportResult(source);
@@ -157,9 +155,7 @@ export namespace service {
 	        this.files = this.convertValues(source["files"], FileResult);
 	        this.warnings = source["warnings"];
 	        this.durationMs = source["durationMs"];
-	        this.needsConfirm = source["needsConfirm"];
-	        this.duplicateFiles = source["duplicateFiles"];
-	        this.pendingPaths = source["pendingPaths"];
+	        this.replaced = source["replaced"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -369,6 +365,7 @@ export namespace view {
 	}
 	export class ClearStagingResult {
 	    weekCode: string;
+	    files: number;
 	    rows: number;
 	
 	    static createFrom(source: any = {}) {
@@ -378,6 +375,7 @@ export namespace view {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.weekCode = source["weekCode"];
+	        this.files = source["files"];
 	        this.rows = source["rows"];
 	    }
 	}

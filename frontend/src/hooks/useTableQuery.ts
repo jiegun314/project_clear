@@ -127,7 +127,10 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
     return () => {
       alive = false;
     };
-  }, [source, notifySettled]);
+    // reloadToken belongs here as well as in the page reset: after an import the
+    // staging area gains its week columns, and the header fetched while it was
+    // empty would leave the grid with no columns and no rows to show.
+  }, [source, notifySettled, reloadToken]);
 
   const load = useCallback(async () => {
     if (source === null || !header) return;
@@ -163,8 +166,12 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
   }, [source, header, page, pageSize, debounced, sort, notifySettled, clearRowsOnError]);
 
   useEffect(() => {
+    // reloadToken is the parent's "look again" signal: the query itself does not
+    // read it, so it is named here to make this a deliberate trigger — the shell
+    // bumps it after an import, a commit or a clear.
+    void reloadToken;
     void load();
-  }, [load]);
+  }, [load, reloadToken]);
 
   const changePageSize = useCallback((size: number) => {
     setPageSize(size);

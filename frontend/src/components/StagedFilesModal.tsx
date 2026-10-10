@@ -116,7 +116,7 @@ export function StagedFilesModal({ open, view, onClose }: StagedFilesModalProps)
         />
       </div>
       <div style={{ marginTop: 8, fontSize: 12, color: JNJ.textMuted }}>
-        同一个文件只会有一行；再次添加已导入的文件会覆盖它原来的数据（其余文件不受影响），点清空后本列表清空。
+        同名文件只会有一行；再次导入或添加同名文件会直接覆盖它原来的数据（其余文件不受影响），点清空后本列表清空。
       </div>
     </Modal>
   );

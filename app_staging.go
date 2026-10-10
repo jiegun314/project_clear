@@ -52,27 +52,9 @@ func (a *App) AddFiles() (out *service.ImportResult, err error) {
 	if len(paths) == 1 {
 		a.rememberDir(filepath.Dir(paths[0]))
 	}
-	res, err := a.svc.AddFiles(paths, a.progress, false)
-	if err != nil {
-		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
-		return nil, err
-	}
-	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
-	return res, nil
-}
-
-// ConfirmAddFiles retries a 添加 after the user accepted that the listed files
-// are already in the integration list. Their old rows are replaced by the
-// freshly read ones; every other file keeps its data.
-func (a *App) ConfirmAddFiles(paths []string) (out *service.ImportResult, err error) {
-	defer a.recoverFault("ConfirmAddFiles", &err)
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	res, err := a.svc.AddFiles(paths, a.progress, true)
+	// A file whose name is already in the list is replaced, not merged: the
+	// service does that without asking, and reports the names it overwrote.
+	res, err := a.svc.AddFiles(paths, a.progress)
 	if err != nil {
 		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
 		return nil, err
@@ -151,5 +133,5 @@ func (a *App) ClearStaging() (out *view.ClearStagingResult, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &view.ClearStagingResult{WeekCode: sum.WeekCode, Rows: rows}, nil
+	return &view.ClearStagingResult{WeekCode: sum.WeekCode, Files: sum.FileOK, Rows: rows}, nil
 }

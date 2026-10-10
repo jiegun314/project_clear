@@ -14,8 +14,6 @@ export function ClearStaging():Promise<view.ClearStagingResult>;
 
 export function Commit():Promise<view.CommitResult>;
 
-export function ConfirmAddFiles(arg1:Array<string>):Promise<service.ImportResult>;
-
 export function Export(arg1:string,arg2:string):Promise<view.ExportResult>;
 
 export function GetAppInfo():Promise<view.AppInfo>;

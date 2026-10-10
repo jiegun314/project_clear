@@ -206,11 +206,23 @@ describe('App', () => {
 
     await renderApp();
     // While the staging area is the source, an empty grid says so.
-    expect(await screen.findByText('暂无临时数据，请使用工具栏的导入或添加')).toBeTruthy();
+    expect(await screen.findByText('已导入，但这一周没有命中 LOC 筛选的数据')).toBeTruthy();
 
+    // The staged data is gone once it is integrated, which is what the strip and
+    // the status bar read.
+    mocked.getStatus.mockResolvedValue({ ...STATUS, hasStaging: false, stagedRows: 0 });
     fireEvent.click(screen.getByRole('button', { name: COMMIT_BUTTON }));
 
-    expect(await screen.findByText(/已整合入库/)).toBeTruthy();
+    // The report is a dialog with the numbers, not a line in the status bar.
+    expect(await screen.findByText('周码 2639 已整合入库')).toBeTruthy();
+    expect(screen.getByText('总行数')).toBeTruthy();
+    expect(screen.getByText('1,516')).toBeTruthy();
+    expect(screen.getByText('本周此前没有数据')).toBeTruthy();
+    // …and the week stays on screen, now labelled as integrated. The label 已整合
+    // also appears in the status bar, so the strip is identified by its detail.
+    expect(screen.getByText('周码 2639（2026-09-21）· 1,516 行 · 13 个文件')).toBeTruthy();
+    // The list itself is named after that state, with the week it holds.
+    expect(screen.getByText('数据清单 - 已整合（周码 2639）')).toBeTruthy();
     // The grid follows the committed week: it renders that week's header and is
     // no longer the staging area. 该周暂无数据 is deliberately not asserted on —
     // the archive panel renders the same sentence.
@@ -245,5 +257,66 @@ describe('App', () => {
     // toolbar's 退出程序 out of the match.
     fireEvent.click(await screen.findByRole('button', { name: /^退\s*出$/ }));
     await waitFor(() => expect(mocked.quit).toHaveBeenCalled());
+  });
+  it('names the list after what has happened to the data', async () => {
+    // A fresh database: nothing staged, nothing integrated.
+    mocked.getStatus.mockResolvedValue({ ...STATUS, hasStaging: false, stagedRows: 0 });
+    mocked.getStagingFiles.mockResolvedValue({ ...STAGED, hasStaging: false, fileCount: 0, rowCount: 0 });
+    mocked.importFolder.mockResolvedValue(IMPORT_RESULT);
+
+    render(<App />);
+    // Nothing has been imported yet, so the list is just its own name.
+    expect(await screen.findByText('数据清单')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_BUTTON }));
+
+    expect(await screen.findByText('数据清单 - 已导入')).toBeTruthy();
+  });
+
+  it('says the data was imported but is not integrated yet', async () => {
+    await renderApp();
+
+    // The strip above the table answers "where did these numbers come from".
+    expect(screen.getByText('已导入，未整合')).toBeTruthy();
+    expect(screen.getByText('周码 2639 · 13 个文件 · 1,516 行')).toBeTruthy();
+    expect(screen.getByText(/点工具栏的整合入库/)).toBeTruthy();
+  });
+
+  it('replaces a same-named file without asking, and names what it replaced', async () => {
+    mocked.addFiles.mockResolvedValue({
+      ...IMPORT_RESULT,
+      action: 'add',
+      replaced: ['source.xlsm', 'extra.xlsm'],
+    });
+
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '添加单个源文件' }));
+
+    // Straight to the summary: no overwrite prompt in between any more.
+    expect(await screen.findByText('合并行数')).toBeTruthy();
+    expect(screen.queryByText('该文件已经在整合清单里')).toBeNull();
+    expect(screen.getByText(/已覆盖 2 个同名文件（source\.xlsm、extra\.xlsm）/)).toBeTruthy();
+  });
+
+  it('reports what 清空 discarded and leaves the area saying 已清空', async () => {
+    mocked.clearStaging.mockResolvedValue({ weekCode: '2639', files: 13, rows: 1516 });
+
+    await renderApp();
+    // 清空 leaves no staging behind, which the refresh after it reads.
+    mocked.getStatus.mockResolvedValue({ ...STATUS, hasStaging: false, stagedRows: 0 });
+    fireEvent.click(screen.getByRole('button', { name: /^清空/ }));
+    // 清空 is irreversible, so it still asks first.
+    // The exact label with antd's inserted space: /清\s*空/ would also match the
+    // toolbar's "清空：删除…" button and press that one again.
+    fireEvent.click(await screen.findByRole('button', { name: '清 空' }));
+
+    expect(await screen.findByText('已清空未整合的数据')).toBeTruthy();
+    expect(screen.getByText('文件数')).toBeTruthy();
+    expect(screen.getByText('13')).toBeTruthy();
+    expect(screen.getByText('1,516')).toBeTruthy();
+    expect(screen.getByText('已清空')).toBeTruthy();
+    expect(screen.getByText('周码 2639 · 13 个文件 · 1,516 行')).toBeTruthy();
+    expect(screen.getByText('数据清单 - 已清空')).toBeTruthy();
+    expect(screen.getByText('已整合数据')).toBeTruthy();
   });
 });

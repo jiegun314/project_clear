@@ -1,5 +1,6 @@
-import { Empty, Table } from 'antd';
+import { Empty, Spin, Table } from 'antd';
 import type { TableProps } from 'antd';
+import { JNJ } from '../theme/jnj';
 import type { GridRow } from '../types';
 
 export interface GridTableProps {
@@ -25,6 +26,33 @@ export interface GridTableProps {
  * those genuinely differ.
  */
 export function GridTable({ rows, columns, loading, emptyText, scrollX, scrollY, pagination, onChange }: GridTableProps) {
+  // With nothing to show there is no table: antd would still draw the header row
+  // and a bordered body with the placeholder inside them, which reads as a stray box
+  // in the upper half of the area. The symbol and its message alone, centred in the
+  // whole area, is what an empty list should look like.
+  if (rows.length === 0) {
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: JNJ.surface,
+        }}
+      >
+        {loading ? (
+          <Spin />
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={<span style={{ color: JNJ.textMuted, fontSize: 13 }}>{emptyText}</span>}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <Table<GridRow>
       size="small"

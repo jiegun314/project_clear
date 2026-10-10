@@ -7,6 +7,8 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { AboutDialog } from './components/AboutDialog';
 import { ImportResultModal } from './components/ImportResultModal';
 import { HistoryView } from './components/HistoryView';
+import { DataStatusStrip, emptyTextFor, titleFor } from './components/DataStatusStrip';
+import { SummaryDialog } from './components/SummaryDialog';
 import { StagedFilesModal } from './components/StagedFilesModal';
 import { JNJ } from './theme/jnj';
 import { hasBackend } from './services/api';
@@ -75,11 +77,16 @@ export default function App() {
         style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', padding: '8px 10px 0' }}
       >
         <div style={{ flex: '1 1 62%', minHeight: TOP_MIN_HEIGHT, display: 'flex', flexDirection: 'column' }}>
+          {/* Where the data came from and whether it has been integrated: the
+              table itself only answers "what are the numbers". */}
+          <DataStatusStrip state={actions.dataState} />
           <DataGrid
             source={actions.gridSource}
             headerDisplay={backend.cfg.headerDisplay}
             pageSize={backend.cfg.pageSize}
             reloadToken={backend.reloadToken}
+            title={titleFor(actions.dataState)}
+            emptyText={emptyTextFor(actions.dataState)}
           />
         </div>
         {/* Drag to resize, double click to go back to the start-up split. */}
@@ -137,6 +144,13 @@ export default function App() {
       <StatusBar status={backend.status} progress={tasks.progress} />
 
       <ImportResultModal open={actions.importOpen} result={actions.importResult} onClose={actions.closeImportSummary} />
+        <SummaryDialog
+          open={actions.summary.open}
+          title={actions.summary.title}
+          items={actions.summary.items}
+          tone={actions.summary.tone}
+          onClose={actions.closeSummary}
+        />
       <StagedFilesModal open={actions.stagedOpen} view={backend.stagedFiles} onClose={actions.closeStagedFiles} />
       <SettingsDialog
         open={actions.settingsOpen}

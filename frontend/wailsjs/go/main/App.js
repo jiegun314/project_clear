@@ -18,10 +18,6 @@ export function Commit() {
   return window['go']['main']['App']['Commit']();
 }
 
-export function ConfirmAddFiles(arg1) {
-  return window['go']['main']['App']['ConfirmAddFiles'](arg1);
-}
-
 export function Export(arg1, arg2) {
   return window['go']['main']['App']['Export'](arg1, arg2);
 }

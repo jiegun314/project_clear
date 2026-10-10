@@ -45,11 +45,10 @@ type ImportResult struct {
 	Files      []FileResult `json:"files"`
 	Warnings   []string     `json:"warnings"`
 	DurationMS int64        `json:"durationMs"`
-	// NeedsConfirm is set by 添加 when one of the picked workbooks is already in
-	// the staging list: the caller asks the user before its rows are replaced.
-	NeedsConfirm   bool     `json:"needsConfirm,omitempty"`
-	DuplicateFiles []string `json:"duplicateFiles,omitempty"`
-	PendingPaths   []string `json:"pendingPaths,omitempty"`
+	// Replaced names the staged workbooks this action overwrote. Re-importing a
+	// file replaces the entry with the same name, so the user is told afterwards
+	// which ones were affected rather than being asked beforehand.
+	Replaced []string `json:"replaced,omitempty"`
 }
 
 // Progress reports how far a long operation has got.
@@ -113,11 +112,12 @@ func (s *Service) ImportFolder(dir string, progress Progress) (*ImportResult, er
 // that is already staged: adding a file grows the current 整合清单, it does not
 // start a new one.
 //
-// A workbook that is already in the list is never added twice. Unless
-// overwrite is set, the call stops as soon as one is found and reports
-// NeedsConfirm with the offending files; the caller asks the user, then calls
-// again with overwrite=true, which replaces exactly those files' rows.
-func (s *Service) AddFiles(paths []string, progress Progress, overwrite bool) (*ImportResult, error) {
+// A workbook that is already in the list is never added twice: the entry with
+// the same file name is overwritten, whichever folder this copy came from. The
+// caller is not asked first — the requirement is that re-importing replaces the
+// previous import outright — so the names that were overwritten come back in
+// Replaced for the summary the user sees.
+func (s *Service) AddFiles(paths []string, progress Progress) (*ImportResult, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("未选择任何文件")
 	}
@@ -126,36 +126,27 @@ func (s *Service) AddFiles(paths []string, progress Progress, overwrite bool) (*
 	if err != nil {
 		return nil, err
 	}
-	stagedPaths := map[string]bool{}
+	stagedNames := map[string]bool{}
 	for _, f := range staged {
-		stagedPaths[filepath.Clean(f.Path)] = true
+		stagedNames[f.Name] = true
 	}
-	var duplicates []string
+	var replaced []string
 	for _, p := range paths {
-		if stagedPaths[filepath.Clean(p)] {
-			duplicates = append(duplicates, p)
+		if name := filepath.Base(p); stagedNames[name] {
+			replaced = append(replaced, name)
 		}
 	}
-	if len(duplicates) > 0 && !overwrite {
-		names := make([]string, len(duplicates))
-		for i, p := range duplicates {
-			names[i] = filepath.Base(p)
-		}
-		s.log.Warn("添加", "%d 个文件已在整合清单中，等待确认是否覆盖", len(duplicates))
-		return &ImportResult{
-			Action:         "add",
-			Total:          len(paths),
-			Files:          []FileResult{},
-			Warnings:       []string{},
-			WeekCodes:      []mps.Week{},
-			IndexNames:     []string{},
-			NeedsConfirm:   true,
-			DuplicateFiles: names,
-			PendingPaths:   duplicates,
-		}, nil
+	if len(replaced) > 0 {
+		s.log.Info("添加", "%d 个文件与整合清单同名，将覆盖原有数据: %s",
+			len(replaced), strings.Join(replaced, "、"))
 	}
 	s.log.Info("添加", "添加 %d 个源文件", len(paths))
-	return s.ingest("add", paths, progress, ingestOptions{merge: true, replace: duplicates})
+	res, err := s.ingest("add", paths, progress, ingestOptions{merge: true, replace: replaced})
+	if err != nil {
+		return nil, err
+	}
+	res.Replaced = replaced
+	return res, nil
 }
 
 // uniquePaths drops repeated picks of the same workbook (the file dialog can

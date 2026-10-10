@@ -27,8 +27,6 @@ interface AppBindings {
   GetStatus(): Promise<Status>;
   ImportFolder(): Promise<ImportResult | null>;
   AddFiles(): Promise<ImportResult | null>;
-  /** Retry 添加 after the user accepted overwriting the listed files. */
-  ConfirmAddFiles(paths: string[]): Promise<ImportResult | null>;
   Commit(): Promise<CommitResult>;
   ClearStaging(): Promise<ClearResult>;
   Export(weekCode: string, mode: string): Promise<ExportResult | null>;
@@ -77,9 +75,8 @@ export const api = {
   getAppInfo: () => app().GetAppInfo(),
   getStatus: () => app().GetStatus(),
   importFolder: () => app().ImportFolder(),
+  /** Adds files to the list; a file with the same name replaces its entry. */
   addFiles: () => app().AddFiles(),
-  /** Called from the overwrite prompt shown by 添加. */
-  confirmAddFiles: (paths: string[]) => app().ConfirmAddFiles(paths),
   commit: () => app().Commit(),
   /** Drops every imported-but-unsaved row; integrated weeks are untouched. */
   clearStaging: () => app().ClearStaging(),

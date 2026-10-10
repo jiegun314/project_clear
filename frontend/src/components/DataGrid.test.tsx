@@ -52,7 +52,7 @@ function result(rows: GridRow[], total = rows.length): GridResult {
 
 function renderGrid(source: string) {
   return render(
-    <DataGrid source={source} headerDisplay="twoRow" pageSize={200} reloadToken={0} />,
+    <DataGrid source={source} headerDisplay="twoRow" pageSize={200} reloadToken={0} title="数据清单" />,
   );
 }
 
@@ -118,7 +118,7 @@ describe('DataGrid', () => {
     // race against.
     await vi.waitFor(() => expect(mocked.queryData).toHaveBeenCalledTimes(1));
     view.rerender(
-      <DataGrid source="2640" headerDisplay="twoRow" pageSize={200} reloadToken={0} />,
+      <DataGrid source="2640" headerDisplay="twoRow" pageSize={200} reloadToken={0} title="数据清单" />,
     );
 
     expect((await screen.findAllByText('NEWER')).length).toBeGreaterThan(0);
@@ -151,5 +151,60 @@ describe('DataGrid', () => {
     await waitFor(() =>
       expect(mocked.queryData).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 500 })),
     );
+  });
+  it('looks again — header included — when the parent bumps the reload token', async () => {
+    // The shell bumps this after an import, a commit or a clear. The staging area
+    // has no week columns until it holds data, so re-reading only the rows would
+    // leave the grid with nowhere to put them: this is the bug that made an import
+    // show up in the status bar while the table stayed empty.
+    mocked.getGridHeader.mockResolvedValue(header(''));
+    mocked.queryData.mockResolvedValue(result([]));
+
+    const view = renderGrid('');
+    await waitFor(() => expect(mocked.getGridHeader).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/共 0 行/)).toBeTruthy();
+
+    // The import has landed: the same source now has a week column and rows.
+    mocked.getGridHeader.mockResolvedValue(header('', '2639'));
+    mocked.queryData.mockResolvedValue(result([row(1, 'ITEM-0001')], 1516));
+    view.rerender(
+      <DataGrid source="" headerDisplay="twoRow" pageSize={200} reloadToken={1} title="数据清单" />,
+    );
+
+    expect((await screen.findAllByText('ITEM-0001')).length).toBeGreaterThan(0);
+    expect(mocked.getGridHeader).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/共 1,516 行/)).toBeTruthy();
+  });
+  it('shows an empty list as a centred message, with no table, borders or pager', async () => {
+    mocked.getGridHeader.mockResolvedValue(header(''));
+    mocked.queryData.mockResolvedValue(result([]));
+
+    renderGrid('');
+
+    await screen.findByText('暂无临时数据，请使用工具栏的导入或添加');
+
+    // No table element at all: an empty antd table draws its header row and a
+    // bordered body around the placeholder, which is the stray box this replaces.
+    expect(document.querySelectorAll('table')).toHaveLength(0);
+    // Nothing to page through, so no footer and no rule above it.
+    expect(document.querySelector('.ant-pagination')).toBeNull();
+
+    // The message and its symbol sit in a container that centres them on both axes,
+    // so they land in the middle of the whole area rather than at the top of a box.
+    // Queried from the live document: the node findByText returned can be detached
+    // by the re-render that follows it.
+    // Waited for rather than read once: the empty state is replaced by a spinner
+    // while a query is in flight, so the node that holds it can come and go.
+    await waitFor(() => {
+      const centred = Array.from(document.querySelectorAll('div')).filter(
+        (d) =>
+          d.style.display === 'flex' &&
+          d.style.justifyContent === 'center' &&
+          d.style.alignItems === 'center' &&
+          (d.textContent ?? '').includes('暂无临时数据'),
+      );
+      expect(centred).toHaveLength(1);
+      expect(centred[0].querySelector('svg')).toBeTruthy();
+    });
   });
 });

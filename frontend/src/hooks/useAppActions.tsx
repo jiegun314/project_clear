@@ -2,10 +2,20 @@ import { useState } from 'react';
 import { Modal } from 'antd';
 import { api } from '../services/api';
 import { errorText } from '../lib/errors';
-import { JNJ } from '../theme/jnj';
+import type { SummaryItem } from '../components/SummaryDialog';
 import type { CommitResult, ExportResult, ImportResult } from '../types';
 import type { BackendState } from './useBackendState';
 import type { TaskRunner } from './useTaskRunner';
+
+/**
+ * What the data area is holding right now — the three states the requirement
+ * names, plus the neutral one before anything has happened.
+ */
+export type DataState =
+  | { kind: 'none' }
+  | { kind: 'imported'; weekCode: string; files: number; rows: number; replaced: string[] }
+  | { kind: 'committed'; weekCode: string; weekStart: string; files: number; rows: number; overwrote: boolean }
+  | { kind: 'cleared'; weekCode: string; files: number; rows: number };
 
 /** Everything the toolbar, the panels and the shortcuts can ask the shell to do. */
 export interface AppActions {
@@ -30,6 +40,11 @@ export interface AppActions {
   historyReady: () => void;
   /** The main grid follows the working set: staging after an import, the committed week after 整合. */
   gridSource: string;
+  /** 已导入（未整合）/ 已整合 / 已清空, shown above the table and in its empty state. */
+  dataState: DataState;
+  /** The dialog 整合入库 and 清空 report through. */
+  summary: { open: boolean; title: string; tone: 'success' | 'neutral'; items: SummaryItem[] };
+  closeSummary: () => void;
   // The actions themselves.
   runImport: (kind: 'import' | 'add') => Promise<void>;
   runCommit: () => Promise<void>;
@@ -62,6 +77,17 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
   // import, and the committed week once the data has been integrated. Without
   // this the grid would empty out at the moment the user integrates.
   const [gridSource, setGridSource] = useState('');
+  // The live staging (below) wins over this; it only answers "what did the last
+  // 整合 or 清空 leave behind" once there is no staging left to ask about.
+  const [lastEvent, setLastEvent] = useState<DataState>({ kind: 'none' });
+  const [summary, setSummary] = useState<AppActions['summary']>({
+    open: false,
+    title: '',
+    tone: 'success',
+    items: [],
+  });
+  const showSummary = (title: string, items: SummaryItem[], tone: 'success' | 'neutral' = 'success') =>
+    setSummary({ open: true, title, tone, items });
 
 
   /** 任务收尾：成功时留下绿色"完成"，失败或取消则清掉进度显示。 */
@@ -69,6 +95,13 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     setImportResult(res);
     setImportOpen(true);
     setGridSource('');
+    setLastEvent({
+      kind: 'imported',
+      weekCode: res.weekCode,
+      files: res.ok,
+      rows: res.rowsKept,
+      replaced: res.replaced ?? [],
+    });
     await backend.afterChange();
   };
 
@@ -76,43 +109,12 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     tasks.begin('准备中', 0, 0);
     let ok = false;
     try {
+      // A file whose name is already in the list is replaced by this call — the
+      // service does that without asking — so there is no confirmation branch
+      // here. Which files were replaced comes back in the result and is reported
+      // by the strip above the table and in the import summary.
       const res = kind === 'import' ? await api.importFolder() : await api.addFiles();
       if (!res) return;
-      if (res.needsConfirm) {
-        // 添加 hit a workbook that is already in the list: ask before its rows
-        // are replaced. Nothing has been written yet, so 取消 leaves the list
-        // exactly as it was.
-        const names = res.duplicateFiles ?? [];
-        Modal.confirm({
-          title: '该文件已经在整合清单里',
-          content: (
-            <div style={{ lineHeight: 1.7 }}>
-              <div>{names.join('、')} 已经导入过，同一个文件不会重复添加。</div>
-              <div style={{ color: JNJ.textMuted, fontSize: 12 }}>
-                继续会用重新读取的数据覆盖它原有的数据，清单里的其他文件不受影响。
-              </div>
-            </div>
-          ),
-          okText: '覆盖原有数据',
-          cancelText: '取消',
-          onOk: async () => {
-            tasks.begin('重新读取', 0, 1);
-            let overwrote = false;
-            try {
-              const again = await api.confirmAddFiles(res.pendingPaths ?? []);
-              if (again) {
-                await finishImport(again);
-                overwrote = true;
-              }
-            } catch (e) {
-              tasks.setNotice({ type: 'error', text: errorText(e) });
-            } finally {
-              tasks.finish(overwrote);
-            }
-          },
-        });
-        return;
-      }
       await finishImport(res);
       ok = true;
     } catch (e) {
@@ -127,11 +129,24 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     let ok = false;
     try {
       const r: CommitResult = await api.commit();
+      // The week stays on screen after 整合 — it is the same data, now in the
+      // archive — and the strip above the table says so.
       setGridSource(r.weekCode);
-      tasks.setNotice({
-        type: 'success',
-        text: `周码 ${r.weekCode}（${r.weekStart}）已整合入库：${r.rowCount.toLocaleString()} 行 / ${r.fileCount} 个文件${r.overwrote ? '，已覆盖原有数据' : ''}`,
+      setLastEvent({
+        kind: 'committed',
+        weekCode: r.weekCode,
+        weekStart: r.weekStart,
+        files: r.fileCount,
+        rows: r.rowCount,
+        overwrote: r.overwrote,
       });
+      showSummary(`周码 ${r.weekCode} 已整合入库`, [
+        { label: '周码', value: `${r.weekCode}（${r.weekStart}）`, strong: true },
+        { label: '总行数', value: r.rowCount.toLocaleString() },
+        { label: '文件数', value: String(r.fileCount) },
+        { label: '原有数据', value: r.overwrote ? '已覆盖同一周的原有数据' : '本周此前没有数据' },
+        { label: '整合时间', value: r.committedAt },
+      ]);
       await backend.afterChange();
       ok = true;
     } catch (e) {
@@ -195,15 +210,28 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
         try {
           const r = await api.clearStaging();
           setGridSource('');
-          tasks.setNotice({
-            type: 'success',
-            text:
-              r && r.rows > 0
-                ? `已清空临时数据：周码 ${r.weekCode}，共 ${r.rows.toLocaleString()} 行`
-                : recordOnly
-                  ? '已清空导入文件列表'
-                  : '已清空临时数据',
+          setLastEvent({
+            kind: 'cleared',
+            weekCode: r?.weekCode ?? '',
+            files: r?.files ?? 0,
+            rows: r?.rows ?? 0,
           });
+          showSummary(
+            '已清空未整合的数据',
+            r && r.rows > 0
+              ? [
+                  { label: '周码', value: r.weekCode, strong: true },
+                  { label: '文件数', value: String(r.files) },
+                  { label: '行数', value: r.rows.toLocaleString() },
+                  { label: '已整合数据', value: '不受影响，仍在历史数据中' },
+                ]
+              : [
+                  { label: '临时数据', value: '没有未整合的数据需要清空' },
+                  { label: '已导入列表', value: recordOnly ? '已一并清空' : '本来就是空的' },
+                  { label: '已整合数据', value: '不受影响，仍在历史数据中' },
+                ],
+            'neutral',
+          );
           await backend.afterChange();
           ok = true;
         } catch (e) {
@@ -226,6 +254,19 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
   };
 
   return {
+    // The live staging is the truth about "已导入，未整合"; without it, the last
+    // 整合 or 清空 is what the data area is showing.
+    dataState: backend.status?.hasStaging
+      ? {
+          kind: 'imported',
+          weekCode: backend.status.weekCode,
+          files: backend.stagedFiles?.fileCount ?? 0,
+          rows: backend.status.stagedRows,
+          replaced: lastEvent.kind === 'imported' ? lastEvent.replaced : [],
+        }
+      : lastEvent,
+    summary,
+    closeSummary: () => setSummary((v) => ({ ...v, open: false })),
     importResult,
     importOpen,
     closeImportSummary: () => setImportOpen(false),
