@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -37,13 +36,10 @@ func (a *App) Export(weekCode string, mode string) (out *view.ExportResult, err 
 	if target == "" {
 		return nil, fmt.Errorf("没有可导出的数据，请先导入文件")
 	}
-	dir := c.ExportDir
-	if dir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, "Documents")
-		}
-	}
-	dest, err := selectSavePath("导出整合数据", fmt.Sprintf("CLEAR_%s%s", target, ext), dir,
+	// The same folder the other choosers open: the last one used while it still
+	// exists, otherwise the program's folder. Sharing lastDir also means a folder
+	// that has been deleted cannot strand this dialog either.
+	dest, err := selectSavePath("导出整合数据", fmt.Sprintf("CLEAR_%s%s", target, ext), a.lastDir(),
 		[]string{strings.TrimPrefix(ext, ".")})
 	if err != nil {
 		return nil, err
