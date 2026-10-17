@@ -103,15 +103,18 @@ func Run(opt Options) error {
 
 	svc := service.New(cfg, log, db, opt.Out)
 
-	// ---- import --------------------------------------------------------
+	// ---- Global import (draft) -----------------------------------------
 	res, err := svc.ImportFolder(opt.In, func(stage string, done, total int) {
 		r.mark("  %s %d/%d", stage, done, total)
 	})
 	if err != nil {
 		return fmt.Errorf("import: %w", err)
 	}
-	r.mark("导入完成: 周码 %s (%s), 成功 %d / 失败 %d / 合计 %d, 合并 %d 行",
-		res.WeekCode, res.WeekStart, res.OK, res.Failed, res.Total, res.RowsKept)
+	if !res.Draft {
+		return errors.New("Global 导入没有先进入草稿状态")
+	}
+	r.mark("导入完成: 周码 %s (%s), 成功 %d / 失败 %d / 合计 %d, 草稿 %d 行",
+		res.WeekCode, res.WeekStart, res.OK, res.Failed, res.Total, res.RowCount)
 	for _, w := range res.Warnings {
 		r.mark("  警告: %s", w)
 	}
@@ -125,12 +128,30 @@ func Run(opt Options) error {
 			status, trunc(f.Name, 58), f.RowsTotal, f.RowsKept, f.Err)
 	}
 
-	// ---- staging query -------------------------------------------------
-	grid, err := svc.Query(store.Query{Source: "", Page: 1, PageSize: 5, SortField: "seq"})
+	// ---- draft query ---------------------------------------------------
+	draftGrid, err := svc.Query(store.DatasetQuery{DatasetID: res.DatasetID, Page: 1, PageSize: 5, SortField: "seq"})
 	if err != nil {
-		return fmt.Errorf("staging query: %w", err)
+		return fmt.Errorf("draft query: %w", err)
 	}
-	r.mark("暂存可查询: %d 行, 首页 %d 行", grid.Total, len(grid.Rows))
+	r.mark("Global 草稿可查询: %d 行, 首页 %d 行", draftGrid.Total, len(draftGrid.Rows))
+
+	// ---- finish the Global import --------------------------------------
+	fin, err := svc.FinishGlobal(false)
+	if err != nil {
+		return fmt.Errorf("finish global: %w", err)
+	}
+	if fin.Version != 1 || fin.RowCount == 0 {
+		return fmt.Errorf("完成导入结果异常: %+v", fin)
+	}
+	r.mark("完成 Global 导入: v%d, %d 行, %d 个文件", fin.Version, fin.RowCount, fin.FileCount)
+	globalGrid, err := svc.Query(store.DatasetQuery{DatasetID: fin.DatasetID, Page: 1, PageSize: 5, SortField: "seq"})
+	if err != nil {
+		return fmt.Errorf("global query: %w", err)
+	}
+	if globalGrid.Total != fin.RowCount {
+		return fmt.Errorf("Global 查询 %d 行, 完成导入报告 %d 行", globalGrid.Total, fin.RowCount)
+	}
+	r.mark("Global 数据集可查询: %d 行", globalGrid.Total)
 
 	// ---- local MPS import ----------------------------------------------
 	if opt.Local == "" {
@@ -142,35 +163,32 @@ func Run(opt Options) error {
 	if err != nil {
 		return fmt.Errorf("import local: %w", err)
 	}
-	sum, err := svc.StagingSummary()
+	r.mark("本地导入完成: Local v%d, %d 行", local.Version, local.LocalRows)
+	localGrid, err := svc.Query(store.DatasetQuery{DatasetID: local.DatasetID, Page: 1, PageSize: 5, SortField: "seq"})
 	if err != nil {
-		return fmt.Errorf("staging summary: %w", err)
+		return fmt.Errorf("local query: %w", err)
 	}
-	r.mark("本地导入完成: 本地 %d 行；工作台 Global %d 行 / Local %d 行",
-		local.LocalRows, sum.Rows(store.DatasetGlobal), sum.Rows(store.DatasetLocal))
-	// Before 整合 the grid shows one imported side at a time; both are queryable.
-	for _, set := range []string{store.DatasetGlobal, store.DatasetLocal} {
-		g, err := svc.Query(store.Query{Source: "", Dataset: set, Page: 1, PageSize: 5, SortField: "seq"})
-		if err != nil {
-			return fmt.Errorf("staging %s query: %w", set, err)
-		}
-		r.mark("暂存 %s 可查询: %d 行", set, g.Total)
+	if localGrid.Total != local.LocalRows {
+		return fmt.Errorf("Local 查询 %d 行, 导入报告 %d 行", localGrid.Total, local.LocalRows)
 	}
+	r.mark("Local 数据集可查询: %d 行", localGrid.Total)
 
-	// ---- commit --------------------------------------------------------
-	entry, overwrote, err := svc.Commit()
+	// ---- integrate -----------------------------------------------------
+	entry, had, wasExpired, err := svc.Commit()
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
-	if overwrote {
+	if had || wasExpired {
 		return errors.New("首次整合被报告为覆盖原有数据")
 	}
-	r.mark("整合完成: %s -> %s, %d 行, %d 个文件", entry.WeekCode, entry.TableName, entry.RowCount, entry.FileCount)
+	r.mark("整合完成: 周码 %s, 合并 %d 行, Global v%d (%d 行), Local v%d (%d 行)",
+		entry.Merged.WeekCode, entry.Merged.RowCount, entry.Global.Version, entry.Global.RowCount,
+		entry.Local.Version, entry.Local.RowCount)
 
 	// ---- export --------------------------------------------------------
-	dest := filepath.Join(opt.Out, fmt.Sprintf("CLEAR_%s.xlsm", entry.WeekCode))
+	dest := filepath.Join(opt.Out, fmt.Sprintf("CLEAR_%s.xlsm", entry.Merged.WeekCode))
 	if opt.Clean {
-		dest = filepath.Join(opt.Out, fmt.Sprintf("CLEAR_%s_clean.xlsx", entry.WeekCode))
+		dest = filepath.Join(opt.Out, fmt.Sprintf("CLEAR_%s_clean.xlsx", entry.Merged.WeekCode))
 	}
 	mode := config.ExportTemplate
 	if opt.Clean {
@@ -180,7 +198,7 @@ func Run(opt Options) error {
 	// workbooks, so it exports the Global dataset: the merged result also carries
 	// the local rows, which have no source workbook to compare against.
 	stats, err := svc.Export(service.ExportOptions{
-		WeekCode: entry.WeekCode, Dataset: store.DatasetGlobal, DestPath: dest, Mode: mode,
+		DatasetID: entry.Global.ID, DestPath: dest, Mode: mode,
 	}, nil)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
@@ -191,84 +209,98 @@ func Run(opt Options) error {
 		stats.CFRulesDropped, stats.PreservedVBA)
 
 	// ---- audit ---------------------------------------------------------
-	if err := r.audit(dest, opt.In, entry.WeekCode); err != nil {
+	if err := r.audit(dest, opt.In, entry.Merged.WeekCode); err != nil {
 		return fmt.Errorf("audit: %w", err)
 	}
 
 	// ---- 三表文件 -------------------------------------------------------
-	bw, err := mps.ParseWeekCode(entry.WeekCode)
+	bw, err := mps.ParseWeekCode(entry.Merged.WeekCode)
 	if err != nil {
 		return err
 	}
 	bundleDest := filepath.Join(opt.Out, fmt.Sprintf("BW_CN_MPS Week%d %d.xlsx", bw.WeekNo, bw.FullYear()))
-	bundle, err := svc.ExportBundle(service.BundleExportOptions{WeekCode: entry.WeekCode, DestPath: bundleDest}, nil)
+	bundle, err := svc.ExportBundle(service.BundleExportOptions{WeekCode: entry.Merged.WeekCode, DestPath: bundleDest}, nil)
 	if err != nil {
 		return fmt.Errorf("bundle export: %w", err)
 	}
-	if err := r.auditBundle(bundleDest, entry.RowCount); err != nil {
+	if err := r.auditBundle(bundleDest, entry.Merged.RowCount); err != nil {
 		return fmt.Errorf("bundle audit: %w", err)
 	}
 	r.mark("三表导出完成: %s (%d 字节, %d 页)", bundleDest, bundle.SizeBytes, bundle.Sheets)
 
-	// ---- 重复整合：同一周码只能有一份，时间标签换成新的 ----------------
-	// 查询界面（历史数据）读的是 archive 表，临时数据不该混进去。
+	// ---- re-import: the integration becomes expired, then is refreshed --
 	if _, err := svc.ImportFolder(opt.In, nil); err != nil {
 		return fmt.Errorf("re-import: %w", err)
 	}
-	// A fresh global import starts a new staging batch, so the local sheet has to
-	// be merged in again before the week can be integrated.
 	if _, err := svc.ImportLocal(opt.Local, nil); err != nil {
 		return fmt.Errorf("re-import local: %w", err)
 	}
-	duringStaging, err := db.ListArchive()
+	if _, err := svc.FinishGlobal(false); err != nil {
+		return fmt.Errorf("finish re-import: %w", err)
+	}
+	during, err := svc.Archive()
 	if err != nil {
-		return fmt.Errorf("list archive during staging: %w", err)
+		return fmt.Errorf("archive during re-import: %w", err)
 	}
-	if len(duringStaging) != 3 {
-		return fmt.Errorf("有临时数据时归档列表有 %d 条, 应当仍只有 %s 的三份数据", len(duringStaging), entry.WeekCode)
+	if len(during) != 3 {
+		return fmt.Errorf("有未整合的新导入时归档列表有 %d 条, 应当仍只有 %s 的三份数据", len(during), entry.Merged.WeekCode)
 	}
-	for _, e := range duringStaging {
-		if e.WeekCode != entry.WeekCode {
-			return fmt.Errorf("有临时数据时归档出现别的周码: %+v", e)
+	for _, e := range during {
+		if e.WeekCode != entry.Merged.WeekCode {
+			return fmt.Errorf("归档出现别的周码: %+v", e)
+		}
+		// Only the integration can be outdated. Global/Local are the current
+		// imports, and their rows carry the new version and creation time.
+		if e.Dataset == store.DatasetMerged {
+			if !e.Expired {
+				return fmt.Errorf("有更新的导入时整合未标记过期: %+v", e)
+			}
+			continue
+		}
+		if e.Expired {
+			return fmt.Errorf("有更新的导入时 %s 被错误标为过期: %+v", e.Dataset, e)
 		}
 	}
-	r.mark("重复整合: 未整合的临时数据未出现在查询列表")
+	r.mark("重复导入: 只有整合标记为已过期，Global/Local 显示当前版本")
 
-	again, overwroteAgain, err := svc.Commit()
+	again, hadAgain, expiredAgain, err := svc.Commit()
 	if err != nil {
 		return fmt.Errorf("re-commit: %w", err)
 	}
-	if !overwroteAgain {
-		return errors.New("重复整合同一周码没有被报告为覆盖原有数据")
+	if !hadAgain || !expiredAgain {
+		return errors.New("重复整合没有被报告为覆盖已过期的整合")
 	}
-	after, err := db.ListArchive()
+	after, err := svc.Archive()
 	if err != nil {
-		return fmt.Errorf("list archive after re-commit: %w", err)
+		return fmt.Errorf("archive after re-commit: %w", err)
 	}
 	if len(after) != 3 {
-		return fmt.Errorf("重复整合后归档有 %d 条记录, 应当只有 %s 的三份数据", len(after), entry.WeekCode)
+		return fmt.Errorf("重复整合后归档有 %d 条记录, 应当只有 %s 的三份数据", len(after), entry.Merged.WeekCode)
 	}
-	mergedAfter := store.ArchiveEntry{}
+	mergedAfter := service.ArchiveEntry{}
 	for _, e := range after {
-		if e.WeekCode != entry.WeekCode {
-			return fmt.Errorf("重复整合后归档周码 = %s, 期望 %s", e.WeekCode, entry.WeekCode)
+		if e.WeekCode != entry.Merged.WeekCode {
+			return fmt.Errorf("重复整合后归档周码 = %s, 期望 %s", e.WeekCode, entry.Merged.WeekCode)
+		}
+		if e.Expired {
+			return fmt.Errorf("重新整合后仍有过期标记: %+v", e)
 		}
 		if e.Dataset == store.DatasetMerged {
 			mergedAfter = e
 		}
 	}
-	if mergedAfter.CommittedAt == "" || mergedAfter.CommittedAt != again.CommittedAt {
-		return fmt.Errorf("整合时间未刷新: 归档 %q, 本次返回 %q", mergedAfter.CommittedAt, again.CommittedAt)
+	if mergedAfter.ImportedAt == "" || mergedAfter.ImportedAt != again.Integration.IntegratedAt {
+		return fmt.Errorf("整合时间未刷新: 归档 %q, 本次返回 %q", mergedAfter.ImportedAt, again.Integration.IntegratedAt)
 	}
-	grid2, err := svc.Query(store.Query{Source: entry.WeekCode, Page: 1, PageSize: 1, SortField: "seq"})
+	grid2, err := svc.Query(store.DatasetQuery{DatasetID: again.Merged.ID, Page: 1, PageSize: 1, SortField: "seq"})
 	if err != nil {
 		return fmt.Errorf("query committed week after re-commit: %w", err)
 	}
-	if grid2.Total != entry.RowCount {
-		return fmt.Errorf("重复整合后周数据 %d 行, 首次 %d 行, 数据被累加或替换不完整", grid2.Total, entry.RowCount)
+	if grid2.Total != entry.Merged.RowCount {
+		return fmt.Errorf("重复整合后周数据 %d 行, 首次 %d 行, 数据被累加或替换不完整", grid2.Total, entry.Merged.RowCount)
 	}
 	r.mark("重复整合: %s 仍只有一份, %d 行, 时间 %s -> %s",
-		entry.WeekCode, grid2.Total, entry.CommittedAt, again.CommittedAt)
+		entry.Merged.WeekCode, grid2.Total, entry.Integration.IntegratedAt, again.Integration.IntegratedAt)
 
 	fmt.Fprintln(r.out, "\n全部检查通过。")
 	return nil

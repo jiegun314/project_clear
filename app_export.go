@@ -16,14 +16,20 @@ import (
 // ---------------------------------------------------------------- export
 
 // Export asks where to save one dataset and writes it as the single-sheet
-// report. An empty mode uses the configured default (纯数据); "clean" and
-// "template" force one engine. The dataset is what the history window picked:
-// global, local or merged (empty means merged).
-func (a *App) Export(weekCode string, dataset string, mode string) (out *view.ExportResult, err error) {
+// report. An empty mode uses the configured default (纯数据).
+func (a *App) Export(datasetID int64, mode string) (out *view.ExportResult, err error) {
 	defer a.recoverFault("Export", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
+	src, err := a.svc.GridSource(datasetID)
+	if err != nil {
+		return nil, err
+	}
+	if src.Dataset == nil {
+		return nil, fmt.Errorf("没有可导出的数据")
+	}
+	d := src.Dataset
 	c := a.cfg.Get()
 	effective := config.ExportMode(mode)
 	if effective == "" {
@@ -33,16 +39,8 @@ func (a *App) Export(weekCode string, dataset string, mode string) (out *view.Ex
 	if effective == config.ExportClean {
 		ext = ".xlsx"
 	}
-	// The save dialog needs a name before the export runs; with no week named
-	// this is whatever the main grid is showing.
-	target := a.svc.ExportWeek(weekCode)
-	if target == "" {
-		return nil, fmt.Errorf("没有可导出的数据，请先导入文件")
-	}
-	// The same folder the other choosers open: the last one used while it still
-	// exists, otherwise the program's folder. Sharing lastDir also means a folder
-	// that has been deleted cannot strand this dialog either.
-	dest, err := selectSavePath("导出整合数据", fmt.Sprintf("CLEAR_%s%s", target, ext), a.lastDir(),
+	name := fmt.Sprintf("CLEAR_%s_%s_v%d%s", d.WeekCode, d.Kind, d.Version, ext)
+	dest, err := selectSavePath("导出数据", name, a.lastDir(),
 		[]string{strings.TrimPrefix(ext, ".")})
 	if err != nil {
 		return nil, err
@@ -54,24 +52,24 @@ func (a *App) Export(weekCode string, dataset string, mode string) (out *view.Ex
 	if !strings.EqualFold(filepath.Ext(dest), ext) {
 		dest = strings.TrimSuffix(dest, filepath.Ext(dest)) + ext
 	}
-	res, err := a.svc.Export(service.ExportOptions{WeekCode: weekCode, Dataset: dataset, DestPath: dest, Mode: effective}, a.progress)
+	res, err := a.svc.Export(service.ExportOptions{DatasetID: datasetID, DestPath: dest, Mode: effective}, a.progress)
 	if err != nil {
 		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
 		return nil, err
 	}
 	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
 	return &view.ExportResult{
-		DestPath: dest, Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
+		DestPath: dest, DatasetID: datasetID, WeekCode: d.WeekCode,
+		Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
 		Comments: res.Comments, CFRows: res.CFRows, StylesUsed: res.StylesUsed,
 		Dropped: res.CFRulesDropped, SizeBytes: res.SizeBytes,
 		PreservedVBA: res.PreservedVBA, DurationMS: res.DurationMS,
-		Sheets: res.Sheets,
+		Sheets: res.Sheets, Expired: src.Expired,
 	}, nil
 }
 
-// ExportBundle asks where to save and writes the three-table workbook: MPS (the
-// merged result), Local and Global, one sheet each. The save dialog offers the
-// name the business uses for that week.
+// ExportBundle asks where to save and writes the integrated week's three-table
+// workbook: MPS (merged), Local and Global.
 func (a *App) ExportBundle(weekCode string) (out *view.ExportResult, err error) {
 	defer a.recoverFault("ExportBundle", &err)
 	if err := a.ready(); err != nil {
@@ -79,7 +77,7 @@ func (a *App) ExportBundle(weekCode string) (out *view.ExportResult, err error) 
 	}
 	target := a.svc.ExportWeek(weekCode)
 	if target == "" {
-		return nil, fmt.Errorf("没有可导出的数据，请先导入文件")
+		return nil, fmt.Errorf("没有可导出的数据，请先导入并整合")
 	}
 	w, err := mps.ParseWeekCode(target)
 	if err != nil {
@@ -98,15 +96,16 @@ func (a *App) ExportBundle(weekCode string) (out *view.ExportResult, err error) 
 	if !strings.EqualFold(filepath.Ext(dest), ".xlsx") {
 		dest = strings.TrimSuffix(dest, filepath.Ext(dest)) + ".xlsx"
 	}
-	res, err := a.svc.ExportBundle(service.BundleExportOptions{WeekCode: weekCode, DestPath: dest}, a.progress)
+	res, err := a.svc.ExportBundle(service.BundleExportOptions{WeekCode: target, DestPath: dest}, a.progress)
 	if err != nil {
 		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
 		return nil, err
 	}
 	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
 	return &view.ExportResult{
-		DestPath: dest, Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
+		DestPath: dest, WeekCode: target, Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
 		SizeBytes: res.SizeBytes, DurationMS: res.DurationMS, Sheets: res.Sheets,
+		Expired: res.Expired,
 	}, nil
 }
 

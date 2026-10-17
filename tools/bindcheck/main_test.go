@@ -9,6 +9,7 @@ import (
 
 	"project_clear/internal/config"
 	"project_clear/internal/mps"
+	"project_clear/internal/service"
 	"project_clear/internal/store"
 	"project_clear/internal/view"
 )
@@ -90,25 +91,31 @@ func TestBoundPayloadFieldNamesArePinned(t *testing.T) {
 		{"AppInfo", view.AppInfo{}, []string{
 			"configPath", "dataDir", "database", "fullName", "goVersion", "name", "platform", "version"}},
 		{"Status", view.Status{}, []string{
-			"archivedRows", "archivedWeeks", "database", "exportMode", "globalRows", "hasGlobal",
-			"hasLocal", "hasStaging", "headerDisplay", "lastAction", "lastDataset", "locFilter",
-			"localRows", "pageSize", "readColumns", "stagedRows", "weekCode", "weekStart"}},
+			"activeWeek", "archivedRows", "archivedWeeks", "canDiscardWeek", "database",
+			"draftFailed", "draftFiles", "draftId", "draftRows", "draftWeek", "exportMode",
+			"globalAt", "globalFiles", "globalId", "globalRows", "globalVersion", "globalWeek",
+			"hasDraft", "hasGlobal", "hasIntegration", "hasLocal", "headerDisplay",
+			"integrationAt", "integrationExpired", "integrationId", "integrationRows",
+			"integrationWeek", "lastAction", "locFilter", "localAt", "localFileName", "localFiles",
+			"localId", "localRows", "localVersion", "localWeek", "pageSize", "readColumns",
+			"unintegrated"}},
 		{"CommitResult", view.CommitResult{}, []string{
-			"committedAt", "fileCount", "globalRows", "localRows", "mergedRows", "overwrote",
-			"rowCount", "tableName", "weekCode", "weekStart"}},
-		{"StagingFilesView", view.NewStagingFilesView(), []string{
-			"batchState", "failedCount", "fileCount", "files", "hasStaging", "rowCount"}},
-		{"ClearStagingResult", view.ClearStagingResult{}, []string{"files", "rows", "weekCode"}},
+			"committedAt", "fileCount", "globalId", "globalRows", "globalVersion", "localId",
+			"localRows", "localVersion", "mergedId", "mergedRows", "mergedVersion", "overwrote",
+			"wasExpired", "weekCode", "weekStart"}},
+		{"FilesView", view.NewFilesView(), []string{"failedCount", "fileCount", "files", "hasDraft", "rowCount"}},
+		{"DiscardWeekResult", view.DiscardWeekResult{}, []string{"datasets", "weekCode"}},
 		{"ExportResult", view.ExportResult{}, []string{
-			"cfRows", "cols", "comments", "destPath", "dropped", "durationMs", "mode",
-			"preservedVba", "rows", "sheets", "sizeBytes", "stylesUsed"}},
+			"cfRows", "cols", "comments", "datasetId", "destPath", "dropped", "durationMs",
+			"expired", "mode", "preservedVba", "rows", "sheets", "sizeBytes", "stylesUsed", "weekCode"}},
 		{"GridQuery", view.GridQuery{}, []string{
-			"dataset", "filters", "page", "pageSize", "search", "sortDesc", "sortField", "source"}},
-		{"ArchiveEntry", store.ArchiveEntry{}, []string{
-			"batchId", "committedAt", "dataset", "fileCount", "indexNames", "rowCount",
-			"tableName", "weekCode", "weekCodes", "weekNo", "weekStart", "year"}},
-		{"GridHeader", view.NewGridHeader(""), []string{
-			"hasStaging", "indexNames", "source", "total", "weekCode", "weekStart", "weeks"}},
+			"datasetId", "filters", "page", "pageSize", "search", "sortDesc", "sortField"}},
+		{"ArchiveEntry", service.ArchiveEntry{}, []string{
+			"committedAt", "dataset", "datasetId", "expired", "fileCount", "rowCount", "version",
+			"weekCode", "weekNo", "weekStart", "year"}},
+		{"GridHeader", view.NewGridHeader(), []string{
+			"datasetId", "expired", "indexNames", "kind", "total", "version", "weekCode",
+			"weekStart", "weeks"}},
 		{"ConfigView", view.ConfigView{}, []string{"config", "path"}},
 	}
 
@@ -128,10 +135,10 @@ func TestGridPayloadsNeverMarshalListsAsNull(t *testing.T) {
 		name string
 		v    any
 	}{
-		{"GridHeader", view.NewGridHeader("")},
-		{"GridHeader after data", view.NewGridHeader("2639").NonNil()},
-		{"StagingFilesView", view.NewStagingFilesView()},
-		{"StagingFilesView after data", (&view.StagingFilesView{}).NonNil()},
+		{"GridHeader", view.NewGridHeader()},
+		{"GridHeader after data", view.NewGridHeader().NonNil()},
+		{"FilesView", view.NewFilesView()},
+		{"FilesView after data", (&view.FilesView{}).NonNil()},
 	}
 
 	for _, c := range cases {
@@ -147,12 +154,9 @@ func TestGridPayloadsNeverMarshalListsAsNull(t *testing.T) {
 
 // The constructor is only worth having if it is what the grid actually gets.
 func TestNewGridHeaderSeedsItsLists(t *testing.T) {
-	h := view.NewGridHeader("")
+	h := view.NewGridHeader()
 	if h.IndexNames == nil || h.Weeks == nil {
 		t.Fatalf("constructor left a nil list: %+v", h)
-	}
-	if h.Source != "" {
-		t.Errorf("source = %q, want the empty staging source", h.Source)
 	}
 	if got := string(mustJSON(t, h)); !strings.Contains(got, `"indexNames":[]`) || !strings.Contains(got, `"weeks":[]`) {
 		t.Errorf("seeded lists did not marshal as empty arrays: %s", got)
@@ -178,14 +182,14 @@ func TestFreshDatabaseIsUsableImmediately(t *testing.T) {
 	}
 	defer st.Close()
 
-	if _, err := st.ListArchive(); err != nil {
-		t.Errorf("archive table missing on a fresh database: %v", err)
+	if _, err := st.ListIntegrations(); err != nil {
+		t.Errorf("integration table missing on a fresh database: %v", err)
 	}
-	if _, err := st.LoadStaging(); err != nil {
-		t.Errorf("staging table missing on a fresh database: %v", err)
+	if _, err := st.Draft(); err != nil {
+		t.Errorf("draft not queryable on a fresh database: %v", err)
 	}
-	if _, err := st.AvailableYears(); err != nil {
-		t.Errorf("archive not queryable on a fresh database: %v", err)
+	if _, err := st.LatestWeek(); err != nil {
+		t.Errorf("dataset table not queryable on a fresh database: %v", err)
 	}
 }
 

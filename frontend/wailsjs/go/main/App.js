@@ -10,20 +10,28 @@ export function ClearLogs() {
   return window['go']['main']['App']['ClearLogs']();
 }
 
-export function ClearStaging() {
-  return window['go']['main']['App']['ClearStaging']();
-}
-
 export function Commit() {
   return window['go']['main']['App']['Commit']();
 }
 
-export function Export(arg1, arg2, arg3) {
-  return window['go']['main']['App']['Export'](arg1, arg2, arg3);
+export function DiscardDraft() {
+  return window['go']['main']['App']['DiscardDraft']();
+}
+
+export function DiscardWeekImports(arg1) {
+  return window['go']['main']['App']['DiscardWeekImports'](arg1);
+}
+
+export function Export(arg1, arg2) {
+  return window['go']['main']['App']['Export'](arg1, arg2);
 }
 
 export function ExportBundle(arg1) {
   return window['go']['main']['App']['ExportBundle'](arg1);
+}
+
+export function FinishGlobalMPS(arg1) {
+  return window['go']['main']['App']['FinishGlobalMPS'](arg1);
 }
 
 export function GetAppInfo() {
@@ -38,16 +46,16 @@ export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
 
-export function GetGridHeader(arg1, arg2) {
-  return window['go']['main']['App']['GetGridHeader'](arg1, arg2);
+export function GetFiles() {
+  return window['go']['main']['App']['GetFiles']();
+}
+
+export function GetGridHeader(arg1) {
+  return window['go']['main']['App']['GetGridHeader'](arg1);
 }
 
 export function GetLogs(arg1) {
   return window['go']['main']['App']['GetLogs'](arg1);
-}
-
-export function GetStagingFiles() {
-  return window['go']['main']['App']['GetStagingFiles']();
 }
 
 export function GetStatus() {

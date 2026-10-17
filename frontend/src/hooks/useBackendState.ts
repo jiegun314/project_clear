@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../services/api';
-import type { AppConfig, StagingFilesView, Status } from '../types';
+import type { AppConfig, FilesView, Status } from '../types';
 
 /** Used until the backend answers, so the first paint has something to render. */
 const DEFAULT_CONFIG: AppConfig = {
@@ -16,8 +16,8 @@ const DEFAULT_CONFIG: AppConfig = {
 export interface BackendState {
   cfg: AppConfig;
   status: Status | null;
-  /** The 整合清单, behind the toolbar's 已导入文件 button. */
-  stagedFiles: StagingFilesView | null;
+  /** The workbooks behind the toolbar's 已导入文件 button. */
+  files: FilesView | null;
   /** Bumped to make the grids reload without re-reading the status. */
   reloadToken: number;
   refresh: () => Promise<void>;
@@ -36,19 +36,19 @@ export interface BackendState {
 export function useBackendState(): BackendState {
   const [cfg, setCfg] = useState<AppConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<Status | null>(null);
-  const [stagedFiles, setStagedFiles] = useState<StagingFilesView | null>(null);
+  const [files, setFiles] = useState<FilesView | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
-      const [s, c, files] = await Promise.all([
+      const [s, c, f] = await Promise.all([
         api.getStatus(),
         api.getConfig(),
-        api.getStagingFiles(),
+        api.getFiles(),
       ]);
       setStatus(s);
       setCfg(c.config);
-      setStagedFiles(files);
+      setFiles(f);
     } catch {
       /* the shell may not be ready yet; the first poll will pick it up */
     }
@@ -66,7 +66,7 @@ export function useBackendState(): BackendState {
   return {
     cfg,
     status,
-    stagedFiles,
+    files,
     reloadToken,
     refresh,
     afterChange,

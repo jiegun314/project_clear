@@ -10,30 +10,18 @@ import (
 	"project_clear/internal/mps"
 )
 
-// Query describes a page of the data grid. The same shape serves the staging
-// area and any committed week, so the UI has one code path.
-type Query struct {
-	// Source is "" for the staging area or a week code such as "2639".
-	Source string
-	// Dataset picks which of a week's three datasets to read; empty means the
-	// merged result. It is ignored for the staging area.
-	Dataset string
-	// Page is 1-based.
-	Page int
-	// PageSize caps the rows returned.
-	PageSize int
-	// Search matches the index columns a planner would type into.
-	Search string
-	// SortField is c1..c15, "seq", or "wk_<code>".
+// DatasetQuery is a page request for one dataset's rows.
+type DatasetQuery struct {
+	DatasetID int64
+	Page      int
+	PageSize  int
+	Search    string
 	SortField string
-	// SortDesc flips the order.
-	SortDesc bool
-	// Filters restricts specific week columns to a numeric threshold, e.g.
-	// {"2639": ">0"}.
-	Filters map[string]string
+	SortDesc  bool
+	Filters   map[string]string
 }
 
-// GridRow is one row as the frontend receives it.
+// GridRow is one row of the data grid.
 type GridRow struct {
 	Seq      int64                 `json:"seq"`
 	Index    [mps.IndexCols]string `json:"index"`
@@ -43,16 +31,14 @@ type GridRow struct {
 	SrcRow   int                   `json:"srcRow"`
 }
 
-// CellMeta carries what the grid needs beyond the number itself: the fill
-// colour the source cell was painted with, and the note attached to it. Both
-// are aligned to the week columns, one entry per week.
+// CellMeta is the per-week display detail: fill colour and note.
 type CellMeta struct {
 	Color   string `json:"color,omitempty"`
 	Comment string `json:"comment,omitempty"`
 	Author  string `json:"author,omitempty"`
 }
 
-// GridResult is a page plus the totals the grid needs.
+// GridResult is one page of rows.
 type GridResult struct {
 	Rows     []GridRow `json:"rows"`
 	Total    int       `json:"total"`
@@ -60,101 +46,14 @@ type GridResult struct {
 	PageSize int       `json:"pageSize"`
 }
 
-// sourceSQL resolves a query source into a table name and a flag telling
-// whether it is the staging area. stagingDataset names the dataset the staging
-// area shows: the merged result once the local file is imported, else global.
-func (s *Store) sourceSQL(q Query) (table string, staging bool, stagingDataset string, weekCodes []string, indexNames []string, err error) {
-	if q.Source == "" {
-		sum, err := s.LoadStaging()
-		if err != nil {
-			return "", false, "", nil, nil, err
-		}
-		if !sum.HasStaging {
-			return "", false, "", nil, nil, fmt.Errorf("没有临时数据")
-		}
-		// Before 整合 the grid shows one of the two imported sides. An explicit
-		// dataset wins when it is actually there; otherwise the last import does.
-		set := sum.DisplayDataset()
-		if q.Dataset != "" {
-			named, err := normaliseDataset(q.Dataset)
-			if err != nil {
-				return "", false, "", nil, nil, err
-			}
-			if sum.Has(named) {
-				set = named
-			}
-		}
-		return "stg_row", true, set, sum.WeekCodes, sum.IndexNames, nil
-	}
-	code, err := mustWeek(q.Source)
-	if err != nil {
-		return "", false, "", nil, nil, err
-	}
-	entry, err := s.ArchiveEntryFor(code, q.Dataset)
-	if err != nil {
-		return "", false, "", nil, nil, err
-	}
-	if entry == nil {
-		return "", false, "", nil, nil, fmt.Errorf("周码 %s 尚未整合入库", code)
-	}
-	return entry.TableName, false, "", entry.WeekCodes, entry.IndexNames, nil
-}
-
-// weekExpr is the SQL expression for a week cell. Committed tables have a real
-// column; the staging area keeps weeks in one JSON array, so the value is
-// pulled out with json_extract and cast, which still sorts numerically.
-//
-// The week order is passed in rather than read from package state: it belongs to
-// one query, and a package-level copy could be replaced by a concurrent import
-// between being set and being read, which would decode the array with another
-// batch's column order.
-func weekExpr(staging bool, code string, weekCodes []string) string {
-	col := WeekColumnName(code)
-	if !staging {
-		return quoteIdent(col)
-	}
-	for i, wc := range weekCodes {
-		if wc == code {
-			return fmt.Sprintf("CAST(json_extract(weeks, '$[%d]') AS REAL)", i)
-		}
-	}
-	return "NULL"
-}
-
-// sortColumn validates a sort target against the columns that actually exist,
-// so a crafted request cannot reach SQL as a raw identifier.
-func sortColumn(field string, weekCodes []string, staging bool) string {
-	switch field {
-	case "":
-		return "seq"
-	case "seq":
-		return "seq"
-	case "fileName", "file_name":
-		return "file_name"
-	case "srcRow", "src_row":
-		return "src_row"
-	}
-	if strings.HasPrefix(field, "c") {
-		if n, err := strconv.Atoi(strings.TrimPrefix(field, "c")); err == nil && n >= 1 && n <= mps.IndexCols {
-			return fmt.Sprintf("c%d", n)
-		}
-	}
-	if strings.HasPrefix(field, "wk_") {
-		code := strings.TrimPrefix(field, "wk_")
-		for _, wc := range weekCodes {
-			if wc == code {
-				return weekExpr(staging, code, weekCodes)
-			}
-		}
-	}
-	return "seq"
-}
-
-// QueryRows returns one page of rows.
-func (s *Store) QueryRows(q Query) (*GridResult, error) {
-	table, staging, stagingDataset, weekCodes, _, err := s.sourceSQL(q)
+// QueryDataset returns one page of a dataset.
+func (s *Store) QueryDataset(q DatasetQuery) (*GridResult, error) {
+	d, err := s.Dataset(q.DatasetID)
 	if err != nil {
 		return nil, err
+	}
+	if d == nil {
+		return nil, fmt.Errorf("数据集不存在")
 	}
 	page := q.Page
 	if page < 1 {
@@ -168,13 +67,8 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 		size = 5000
 	}
 
-	where := []string{}
-	var args []any
-	if staging {
-		where = append(where, "batch_id = (SELECT id FROM batch WHERE status='staging' ORDER BY id DESC LIMIT 1)")
-		where = append(where, "dataset = ?")
-		args = append(args, stagingDataset)
-	}
+	where := []string{"dataset_id = ?"}
+	args := []any{d.ID}
 	if kw := strings.TrimSpace(q.Search); kw != "" {
 		like := "%" + kw + "%"
 		var parts []string
@@ -188,7 +82,7 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 		if !ValidWeekCode(code) {
 			continue
 		}
-		col := weekExpr(staging, code, weekCodes)
+		col := datasetWeekExpr(d.WeekCodes, code)
 		op, value, ok := splitCondition(cond)
 		if !ok {
 			continue
@@ -202,133 +96,115 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 			where = append(where, fmt.Sprintf("%s %s ?", col, op))
 			args = append(args, n)
 		case "empty":
-			where = append(where, col+" IS NULL")
+			where = append(where, fmt.Sprintf("(%s IS NULL OR %s = '')", col, col))
 		case "notempty":
-			where = append(where, col+" IS NOT NULL")
+			where = append(where, fmt.Sprintf("(%s IS NOT NULL AND %s <> '')", col, col))
 		}
 	}
-	clause := ""
-	if len(where) > 0 {
-		clause = " WHERE " + strings.Join(where, " AND ")
-	}
+	condition := strings.Join(where, " AND ")
 
 	var total int
-	if err := s.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s%s`, quoteIdent(table), clause), args...).
-		Scan(&total); err != nil {
+	if err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM dataset_row WHERE `+condition, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 
-	order := sortColumn(q.SortField, weekCodes, staging)
-	dir := "ASC"
-	if q.SortDesc {
-		dir = "DESC"
-	}
-	// Loaded before the row cursor opens: the pool deliberately holds one
-	// connection, so a second query cannot run while rows are streaming.
+	// Loaded before the cursor: the pool has one connection, so a second query
+	// while this one is open would wait for itself.
 	colors, err := s.fillColors()
 	if err != nil {
 		return nil, err
 	}
-	// seq breaks ties so paging is stable.
-	sqlText := fmt.Sprintf(`SELECT %s FROM %s%s ORDER BY %s %s, seq ASC LIMIT ? OFFSET ?`,
-		columnList(staging, weekCodes), quoteIdent(table), clause, order, dir)
 
-	// LIMIT/OFFSET values must not reuse the filter placeholders.
-	execArgs := append(append([]any{}, args...), size, (page-1)*size)
-	rows, err := s.db.Query(sqlText, execArgs...)
+	order := datasetSort(q.SortField, q.SortDesc, d.WeekCodes)
+	rows, err := s.db.Query(fmt.Sprintf(
+		`SELECT seq, c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,
+		        weeks, style_ids, comments, cf_colors, file_name, src_row
+		 FROM dataset_row WHERE %s ORDER BY %s LIMIT ? OFFSET ?`,
+		condition, order), append(args, size, (page-1)*size)...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	out := &GridResult{Rows: []GridRow{}, Total: total, Page: page, PageSize: size}
 	for rows.Next() {
-		gr, err := s.scanGridRow(rows, staging, weekCodes, colors)
-		if err != nil {
+		var gr GridRow
+		var weeksJSON, styleJSON string
+		var commentsJSON, cfColorsJSON, fileName sql.NullString
+		var srcRow sql.NullInt64
+		idx := make([]sql.NullString, mps.IndexCols)
+		scan := []any{&gr.Seq}
+		for i := range idx {
+			scan = append(scan, &idx[i])
+		}
+		scan = append(scan, &weeksJSON, &styleJSON, &commentsJSON, &cfColorsJSON, &fileName, &srcRow)
+		if err := rows.Scan(scan...); err != nil {
 			return nil, err
 		}
-		out.Rows = append(out.Rows, gr)
-	}
-	return out, rows.Err()
-}
-
-func columnList(staging bool, weekCodes []string) string {
-	cols := []string{"seq"}
-	for i := 1; i <= mps.IndexCols; i++ {
-		cols = append(cols, fmt.Sprintf("c%d", i))
-	}
-	if !staging {
-		for _, wc := range weekCodes {
-			cols = append(cols, WeekColumnName(wc))
+		for i := range idx {
+			gr.Index[i] = idx[i].String
 		}
-	} else {
-		// The staging area keeps every week in one JSON array instead of one
-		// column per week; it has to be selected or the grid shows blanks.
-		cols = append(cols, "weeks")
-	}
-	cols = append(cols, "style_ids", "comments", "cf_colors", "file_name", "src_row")
-	return strings.Join(cols, ",")
-}
-
-func (s *Store) scanGridRow(rows *sql.Rows, staging bool, weekCodes []string, colors map[int]string) (GridRow, error) {
-	var gr GridRow
-	seq := &gr.Seq
-	scans := make([]any, 0, 4+mps.IndexCols+len(weekCodes))
-	scans = append(scans, seq)
-	texts := make([]sql.NullString, mps.IndexCols)
-	for i := range texts {
-		scans = append(scans, &texts[i])
-	}
-	var weekVals []sql.NullString
-	var weeksJSON sql.NullString
-	if !staging {
-		weekVals = make([]sql.NullString, len(weekCodes))
-		for i := range weekVals {
-			scans = append(scans, &weekVals[i])
-		}
-	} else {
-		scans = append(scans, &weeksJSON)
-	}
-	var styleJSON, commentsJSON, cfColorsJSON sql.NullString
-	var fileName sql.NullString
-	var srcRow sql.NullInt64
-	scans = append(scans, &styleJSON, &commentsJSON, &cfColorsJSON, &fileName, &srcRow)
-	if err := rows.Scan(scans...); err != nil {
-		return gr, err
-	}
-	for i := range texts {
-		gr.Index[i] = texts[i].String
-	}
-	gr.Weeks = make([]string, len(weekCodes))
-	if staging {
 		var values []string
-		s.decodeJSON("周数据", weeksJSON.String, &values)
+		s.decodeJSON("周数据", weeksJSON, &values)
+		gr.Weeks = make([]string, len(d.WeekCodes))
 		for i := range gr.Weeks {
 			if i < len(values) {
 				gr.Weeks[i] = values[i]
 			}
 		}
-	} else {
-		for i, v := range weekVals {
-			gr.Weeks[i] = nullToCell(v)
-		}
+		gr.WeekMeta = s.buildWeekMeta(d.WeekCodes, styleJSON, commentsJSON.String, cfColorsJSON.String, colors)
+		gr.FileName = fileName.String
+		gr.SrcRow = int(srcRow.Int64)
+		out.Rows = append(out.Rows, gr)
 	}
-	gr.WeekMeta = s.buildWeekMeta(weekCodes, styleJSON.String, commentsJSON.String, cfColorsJSON.String, colors)
-	gr.FileName = fileName.String
-	gr.SrcRow = int(srcRow.Int64)
-	return gr, nil
+	return out, rows.Err()
 }
 
-// buildWeekMeta aligns the row's interned style ids and its notes with the week
-// columns. Both are stored against absolute column numbers, so the week at
-// index i corresponds to entry FirstWeekCol-1+i.
+// datasetWeekExpr is the JSON expression for one week column of a dataset.
+func datasetWeekExpr(weekCodes []string, code string) string {
+	for i, wc := range weekCodes {
+		if wc == code {
+			return fmt.Sprintf("CAST(json_extract(weeks, '$[%d]') AS REAL)", i)
+		}
+	}
+	return "NULL"
+}
+
+// datasetSort validates a sort field against the columns this dataset has.
+func datasetSort(field string, desc bool, weekCodes []string) string {
+	dir := ""
+	if desc {
+		dir = " DESC"
+	}
+	col := "seq"
+	switch field {
+	case "", "seq":
+		col = "seq"
+	case "fileName", "file_name":
+		col = "file_name"
+	case "srcRow", "src_row":
+		col = "src_row"
+	default:
+		if strings.HasPrefix(field, "c") {
+			if n, err := strconv.Atoi(strings.TrimPrefix(field, "c")); err == nil && n >= 1 && n <= mps.IndexCols {
+				col = fmt.Sprintf("c%d", n)
+			}
+		} else if strings.HasPrefix(field, "wk_") {
+			code := strings.TrimPrefix(field, "wk_")
+			expr := datasetWeekExpr(weekCodes, code)
+			if expr != "NULL" {
+				col = expr
+			}
+		}
+	}
+	return col + dir + ", seq"
+}
+
 func (s *Store) buildWeekMeta(weekCodes []string, styleJSON, commentsJSON, cfColorsJSON string, colors map[int]string) []CellMeta {
 	var styleIDs []int
 	s.decodeJSON("单元格样式", styleJSON, &styleIDs)
 	var comments mps.CommentMap
 	s.decodeJSON("批注", commentsJSON, &comments)
-	// 条件格式算出来的颜色优先于静态填充色：Excel 里看到的信号色（红/黄/蓝/绿）
-	// 来自条件格式，只有没有命中规则时才回落到单元格本身的底色。
 	var cfColors []string
 	s.decodeJSON("条件格式颜色", cfColorsJSON, &cfColors)
 	out := make([]CellMeta, len(weekCodes))
@@ -347,9 +223,6 @@ func (s *Store) buildWeekMeta(weekCodes []string, styleJSON, commentsJSON, cfCol
 	return out
 }
 
-// fillColors maps every interned style id onto the background colour it paints,
-// as #RRGGBB. Styles that paint nothing are simply absent from the map, which
-// is what the grid renders as a plain cell.
 func (s *Store) fillColors() (map[int]string, error) {
 	list, err := s.LoadStyles()
 	if err != nil {
@@ -364,7 +237,6 @@ func (s *Store) fillColors() (map[int]string, error) {
 	return out, nil
 }
 
-// fillColorOf reads the pattern fill out of an excelize style signature.
 func fillColorOf(sig json.RawMessage) string {
 	var st struct {
 		Fill struct {
@@ -381,8 +253,6 @@ func fillColorOf(sig json.RawMessage) string {
 	return normaliseColor(st.Fill.Color[0])
 }
 
-// normaliseColor turns the ARGB or RGB string Excel stores into a #RRGGBB CSS
-// colour, rejecting the fully transparent value.
 func normaliseColor(v string) string {
 	v = strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(v, "#")))
 	switch len(v) {
@@ -395,13 +265,6 @@ func normaliseColor(v string) string {
 		return "#" + v[2:]
 	}
 	return ""
-}
-
-func nullToCell(v sql.NullString) string {
-	if !v.Valid {
-		return ""
-	}
-	return v.String
 }
 
 func splitCondition(cond string) (op, value string, ok bool) {
@@ -420,7 +283,7 @@ func splitCondition(cond string) (op, value string, ok bool) {
 	return "", "", false
 }
 
-// ExportRow is a committed row with everything needed to rebuild it.
+// ExportRow is a dataset row with everything needed to rebuild it.
 type ExportRow struct {
 	Seq       int64
 	Index     [mps.IndexCols]string
@@ -432,186 +295,31 @@ type ExportRow struct {
 	SourceRow int
 }
 
-// FetchExportRows reads a committed week's merged result in full, for export.
-func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, error) {
-	return s.FetchExportRowsOf(weekCode, DatasetMerged)
-}
-
-// FetchExportRowsOf reads one dataset of a committed week in full.
-func (s *Store) FetchExportRowsOf(weekCode, dataset string) (*ArchiveEntry, []ExportRow, error) {
-	entry, err := s.ArchiveEntryFor(weekCode, dataset)
+// ExportRows reads a dataset in full, for export.
+func (s *Store) ExportRows(datasetID int64) (*Dataset, []ExportRow, error) {
+	d, err := s.Dataset(datasetID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if entry == nil {
-		return nil, nil, fmt.Errorf("周码 %s 尚未整合入库", weekCode)
+	if d == nil {
+		return nil, nil, fmt.Errorf("数据集不存在")
 	}
-	cols := []string{"seq"}
-	for i := 1; i <= mps.IndexCols; i++ {
-		cols = append(cols, fmt.Sprintf("c%d", i))
-	}
-	for _, wc := range entry.WeekCodes {
-		cols = append(cols, WeekColumnName(wc))
-	}
-	cols = append(cols, "cf_id", "file_name", "src_row", "style_ids", "comments")
-
-	// Load the format programs up front: querying them while the row cursor
-	// is open would need a second connection, and the pool allows only one.
-	cfPatterns, err := s.LoadCFPatterns()
+	rows, err := s.DatasetRows(datasetID)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM %s ORDER BY seq`,
-		strings.Join(cols, ","), quoteIdent(entry.TableName)))
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-
-	var out []ExportRow
-	for rows.Next() {
-		var r ExportRow
-		texts := make([]sql.NullString, mps.IndexCols)
-		weeks := make([]sql.RawBytes, len(entry.WeekCodes))
-		var cfID sql.NullInt64
-		var fileName sql.NullString
-		var srcRow sql.NullInt64
-		var styleJSON sql.NullString
-		var commentsJSON sql.NullString
-		scans := []any{&r.Seq}
-		for i := range texts {
-			scans = append(scans, &texts[i])
-		}
+	out := make([]ExportRow, 0, len(rows))
+	for _, r := range rows {
+		weeks := make([]any, len(d.WeekCodes))
 		for i := range weeks {
-			scans = append(scans, &weeks[i])
-		}
-		scans = append(scans, &cfID, &fileName, &srcRow, &styleJSON, &commentsJSON)
-		if err := rows.Scan(scans...); err != nil {
-			return nil, nil, err
-		}
-		for i := range texts {
-			r.Index[i] = texts[i].String
-		}
-		r.Weeks = make([]any, len(entry.WeekCodes))
-		for i := range weeks {
-			r.Weeks[i] = decodeWeekCell(weeks[i])
-		}
-		r.FileName = fileName.String
-		r.SourceRow = int(srcRow.Int64)
-		if styleJSON.Valid && styleJSON.String != "" {
-			s.decodeJSON("单元格样式", styleJSON.String, &r.StyleIDs)
-		}
-		if commentsJSON.Valid && commentsJSON.String != "" {
-			s.decodeJSON("批注", commentsJSON.String, &r.Comments)
-		}
-		if cfID.Valid {
-			if payload, ok := cfPatterns[cfID.Int64]; ok {
-				r.CF = mps.UnmarshalRow(payload)
+			if i < len(r.Weeks) {
+				weeks[i] = weekValue(r.Weeks[i])
 			}
 		}
-		out = append(out, r)
+		out = append(out, ExportRow{
+			Index: r.Index, Weeks: weeks, StyleIDs: r.StyleIDs,
+			CF: r.CF, Comments: r.Comments, SourceRow: r.SourceRow, FileName: r.FileName,
+		})
 	}
-	return entry, out, rows.Err()
-}
-
-// FetchStagingExportRows reads the staging area in the same shape as a
-// committed week, so 导出 works on data that has been imported but not yet
-// integrated — the merged rows the main grid is showing.
-//
-// An empty dataset means what the grid shows (merged once the local file has
-// been imported, global before that); the three-table export names each one
-// explicitly.
-func (s *Store) FetchStagingExportRows(dataset string) (*StagingSummary, []ExportRow, error) {
-	sum, err := s.LoadStaging()
-	if err != nil {
-		return nil, nil, err
-	}
-	if !sum.HasStaging {
-		return nil, nil, fmt.Errorf("没有待导出的临时数据")
-	}
-	set := sum.DisplayDataset()
-	if strings.ToLower(strings.TrimSpace(dataset)) != "" {
-		set, err = normaliseDataset(dataset)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !sum.Has(set) {
-			return nil, nil, fmt.Errorf("临时数据里没有 %s 数据集", set)
-		}
-	}
-
-	// Loaded up front: the pool allows one connection, so a second query
-	// cannot run while the row cursor below is open.
-	cfPatterns, err := s.LoadCFPatterns()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cols := make([]string, 0, mps.IndexCols+7)
-	cols = append(cols, "seq")
-	for i := 1; i <= mps.IndexCols; i++ {
-		cols = append(cols, fmt.Sprintf("c%d", i))
-	}
-	cols = append(cols, "weeks", "style_ids", "cf_id", "comments", "file_name", "src_row")
-
-	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM stg_row WHERE batch_id=? AND dataset=? ORDER BY seq`,
-		strings.Join(cols, ",")), sum.BatchID, set)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-
-	var out []ExportRow
-	for rows.Next() {
-		var r ExportRow
-		var weeksJSON, styleJSON string
-		var cfID sql.NullInt64
-		var commentsJSON, fileName sql.NullString
-		var srcRow sql.NullInt64
-		texts := make([]sql.NullString, mps.IndexCols)
-		scans := []any{&r.Seq}
-		for i := range texts {
-			scans = append(scans, &texts[i])
-		}
-		scans = append(scans, &weeksJSON, &styleJSON, &cfID, &commentsJSON, &fileName, &srcRow)
-		if err := rows.Scan(scans...); err != nil {
-			return nil, nil, err
-		}
-		for i := range texts {
-			r.Index[i] = texts[i].String
-		}
-		var weeks []string
-		s.decodeJSON("周数据", weeksJSON, &weeks)
-		r.Weeks = make([]any, len(sum.WeekCodes))
-		for i := range r.Weeks {
-			if i < len(weeks) {
-				r.Weeks[i] = weekValue(weeks[i])
-			}
-		}
-		s.decodeJSON("单元格样式", styleJSON, &r.StyleIDs)
-		if commentsJSON.Valid && commentsJSON.String != "" {
-			s.decodeJSON("批注", commentsJSON.String, &r.Comments)
-		}
-		if cfID.Valid {
-			if payload, ok := cfPatterns[cfID.Int64]; ok {
-				r.CF = mps.UnmarshalRow(payload)
-			}
-		}
-		r.FileName = fileName.String
-		r.SourceRow = int(srcRow.Int64)
-		out = append(out, r)
-	}
-	return sum, out, rows.Err()
-}
-
-// decodeWeekCell turns a stored cell back into the value to write out.
-func decodeWeekCell(raw []byte) any {
-	if len(raw) == 0 {
-		return nil
-	}
-	if n, err := strconv.ParseFloat(string(raw), 64); err == nil {
-		return n
-	}
-	return string(raw)
+	return d, out, nil
 }

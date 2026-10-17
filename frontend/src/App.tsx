@@ -27,6 +27,25 @@ export default function App() {
   const actions = useAppActions(backend, tasks);
   const split = useSplitPane();
 
+  const status = backend.status;
+  const canIntegrate = Boolean(
+    status?.hasGlobal &&
+      status?.hasLocal &&
+      !status?.hasDraft &&
+      status?.globalWeek &&
+      status?.globalWeek === status?.localWeek,
+  );
+  // This module belongs to Global only; Local is one workbook and is reported in
+  // the status strip, so its count must not inflate the Global file count.
+  const globalFiles = status?.hasDraft ? status.draftFiles : status?.globalFiles ?? 0;
+  // The Global module describes the source workbooks only. Whether the week's
+  // integration is current or expired belongs to the integration, not here.
+  const countLabel = !status?.activeWeek
+    ? '0 个文件'
+    : status.hasDraft
+      ? `${globalFiles} 个文件 · 导入中`
+      : `${globalFiles} 个文件 · 已导入`;
+
   if (!hasBackend()) {
     return (
       <div style={{ padding: 40 }}>
@@ -44,18 +63,22 @@ export default function App() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: JNJ.bg }}>
       <Toolbar
         busy={tasks.busy}
-        hasStaging={Boolean(backend.status?.hasStaging)}
+        hasDraft={Boolean(backend.status?.hasDraft)}
         hasGlobal={Boolean(backend.status?.hasGlobal)}
         hasLocal={Boolean(backend.status?.hasLocal)}
-        hasArchive={(backend.status?.archivedWeeks ?? 0) > 0}
-        stagedFiles={backend.stagedFiles}
+        canIntegrate={canIntegrate}
+        hasIntegration={Boolean(backend.status?.hasIntegration)}
+        integrationExpired={Boolean(backend.status?.integrationExpired)}
+        countLabel={countLabel}
+        failedCount={backend.files?.failedCount ?? backend.status?.draftFailed ?? 0}
         onImport={() => void actions.runImport('import')}
         onAdd={() => void actions.runImport('add')}
+        onFinish={() => void actions.runFinishGlobal()}
         onImportLocal={() => void actions.runImportLocal()}
         onCommit={() => void actions.runCommit()}
-        onClear={actions.runClear}
+        onClear={actions.runDiscardDraft}
         onExport={() => void actions.runToolbarExport()}
-        onViewStagedFiles={actions.openStagedFiles}
+        onViewFiles={actions.openFiles}
         onSettings={actions.openSettings}
         onAbout={actions.openAbout}
         onQuit={actions.runQuit}
@@ -84,11 +107,11 @@ export default function App() {
               table itself only answers "what are the numbers". */}
           <DataStatusStrip
             state={actions.dataState}
-            onSelectDataset={actions.selectStagingDataset}
+            onSelectDataset={actions.selectDataset}
+            onDiscardWeek={actions.runDiscardWeek}
           />
           <DataGrid
-            source={actions.gridSource}
-            dataset={actions.gridDataset}
+            datasetID={actions.gridDatasetId}
             headerDisplay={backend.cfg.headerDisplay}
             pageSize={backend.cfg.pageSize}
             reloadToken={backend.reloadToken}
@@ -158,7 +181,7 @@ export default function App() {
           tone={actions.summary.tone}
           onClose={actions.closeSummary}
         />
-      <StagedFilesModal open={actions.stagedOpen} view={backend.stagedFiles} onClose={actions.closeStagedFiles} />
+      <StagedFilesModal open={actions.filesOpen} view={backend.files} onClose={actions.closeFiles} />
       <SettingsDialog
         open={actions.settingsOpen}
         onClose={actions.closeSettings}
@@ -169,13 +192,11 @@ export default function App() {
       />
       <AboutDialog open={actions.aboutOpen} onClose={actions.closeAbout} />
       <HistoryView
-        weekCode={actions.historyWeek}
+        datasetId={actions.historyDatasetId}
         dataset={actions.historyDataset}
         onClose={actions.closeHistory}
         onExported={(m) => tasks.setNotice({ type: 'success', text: m })}
-        onExport={(mode) =>
-          actions.runExport(actions.historyWeek ?? undefined, mode, actions.historyDataset)
-        }
+        onExport={(datasetId, mode) => actions.runExport(datasetId, mode)}
         onReady={actions.historyReady}
       />
       {actions.historyLoading && (
@@ -194,7 +215,7 @@ export default function App() {
         >
           <Spin size="large" />
           <span style={{ color: JNJ.text, fontSize: 13 }}>
-            正在载入历史数据{actions.historyWeek ? `（周码 ${actions.historyWeek}）` : ''}…
+            正在载入历史数据{actions.historyDatasetId ? '（数据集）' : ''}…
           </span>
         </div>
       )}

@@ -9,16 +9,17 @@ import type {
   AppConfig,
   AppInfo,
   ArchiveEntry,
-  ClearResult,
   CommitResult,
   ConfigView,
+  DiscardWeekResult,
   ExportResult,
+  FilesView,
+  FinishResult,
   GridHeader,
   GridQuery,
   GridResult,
   ImportResult,
   LogEntry,
-  StagingFilesView,
   Status,
 } from '../types';
 
@@ -27,14 +28,17 @@ interface AppBindings {
   GetStatus(): Promise<Status>;
   ImportFolder(): Promise<ImportResult | null>;
   AddFiles(): Promise<ImportResult | null>;
-  Commit(): Promise<CommitResult>;
-  ClearStaging(): Promise<ClearResult>;
+  FinishGlobalMPS(confirmFailures: boolean): Promise<FinishResult>;
   ImportLocalMPS(): Promise<ImportResult | null>;
-  Export(weekCode: string, dataset: string, mode: string): Promise<ExportResult | null>;
+  Commit(): Promise<CommitResult>;
+  DiscardDraft(): Promise<ImportResult>;
+  DiscardWeekImports(weekCode: string): Promise<DiscardWeekResult>;
+  GetFiles(): Promise<FilesView>;
+  Export(datasetId: number, mode: string): Promise<ExportResult | null>;
   ExportBundle(weekCode: string): Promise<ExportResult | null>;
   RevealExport(path: string): Promise<void>;
   QueryData(q: GridQuery): Promise<GridResult>;
-  GetGridHeader(source: string, dataset: string): Promise<GridHeader>;
+  GetGridHeader(datasetId: number): Promise<GridHeader>;
   GetArchive(): Promise<ArchiveEntry[]>;
   GetYears(): Promise<number[]>;
   GetWeeks(year: number): Promise<number[]>;
@@ -42,7 +46,6 @@ interface AppBindings {
   SaveConfig(c: AppConfig): Promise<string[]>;
   ResetConfig(): Promise<ConfigView>;
   GetLogs(limit: number): Promise<LogEntry[]>;
-  GetStagingFiles(): Promise<StagingFilesView>;
   ClearLogs(): Promise<void>;
   Quit(): Promise<void>;
 }
@@ -77,22 +80,24 @@ export const api = {
   getAppInfo: () => app().GetAppInfo(),
   getStatus: () => app().GetStatus(),
   importFolder: () => app().ImportFolder(),
-  /** Adds files to the list; a file with the same name replaces its entry. */
+  /** Adds files to the open Global draft (copy-on-write when it is complete). */
   addFiles: () => app().AddFiles(),
-  commit: () => app().Commit(),
-  /** Drops every imported-but-unsaved row; integrated weeks are untouched. */
-  clearStaging: () => app().ClearStaging(),
-  /** Asks for one 本地 MPS workbook, checks it and merges it into the staging area. */
+  /** Completes the Global draft; failures have to be acknowledged. */
+  finishGlobalMPS: (confirmFailures: boolean) => app().FinishGlobalMPS(confirmFailures),
+  /** The Local workbook is a complete dataset on its own. */
   importLocalMPS: () => app().ImportLocalMPS(),
-  /**
-   * One dataset as the single-sheet report. mode is "", "clean" or "template";
-   * "" follows the configured default.
-   */
-  export: (weekCode: string, dataset: string, mode: string) => app().Export(weekCode, dataset, mode),
-  /** The MPS / Local / Global workbook, with the save dialog's default name. */
+  commit: () => app().Commit(),
+  /** Discards the open Global draft only. */
+  discardDraft: () => app().DiscardDraft(),
+  /** Discards the week's un-integrated exports; history is untouched. */
+  discardWeekImports: (weekCode: string) => app().DiscardWeekImports(weekCode),
+  getFiles: () => app().GetFiles(),
+  /** One dataset as the single-sheet report; mode is "", "clean" or "template". */
+  exportDataset: (datasetId: number, mode: string) => app().Export(datasetId, mode),
+  /** The integrated week's MPS / Local / Global workbook. */
   exportBundle: (weekCode: string) => app().ExportBundle(weekCode),
   queryData: (q: GridQuery) => app().QueryData(q),
-  getGridHeader: (source: string, dataset: string) => app().GetGridHeader(source, dataset),
+  getGridHeader: (datasetId: number) => app().GetGridHeader(datasetId),
   getArchive: () => app().GetArchive(),
   getYears: () => app().GetYears(),
   getWeeks: (year: number) => app().GetWeeks(year),
@@ -100,7 +105,6 @@ export const api = {
   saveConfig: (c: AppConfig) => app().SaveConfig(c),
   resetConfig: () => app().ResetConfig(),
   getLogs: (limit: number) => app().GetLogs(limit),
-  getStagingFiles: () => app().GetStagingFiles(),
   clearLogs: () => app().ClearLogs(),
   quit: () => app().Quit(),
 };
@@ -111,4 +115,3 @@ export function onEvent<T>(name: string, cb: (payload: T) => void): () => void {
   if (!rt) return () => undefined;
   return rt.EventsOn(name, (...data: unknown[]) => cb(data[0] as T));
 }
-

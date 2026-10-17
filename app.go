@@ -43,7 +43,7 @@ import (
 const (
 	AppName    = "CLEAR"
 	AppFull    = "Consolidation & Loading of Enterprise Analytics for Replenishment"
-	AppVersion = "2.0.0"
+	AppVersion = "2.1.0"
 )
 
 // App is the object whose exported methods are bound to the frontend.
@@ -132,6 +132,14 @@ func (a *App) boot() error {
 		return err
 	}
 	a.db = db
+	// A Global import is still being assembled when the program closes: the new
+	// model discards those drafts on startup, so an unfinished import never
+	// lingers half-done behind the scenes.
+	if n, err := db.DiscardAllDrafts(); err != nil {
+		a.log.Warn("启动", "清理上次未完成的导入失败: %v", err)
+	} else if n > 0 {
+		a.log.Warn("启动", "已丢弃上次未完成的 Global 导入（%d 个草稿）", n)
+	}
 	a.svc = service.New(cfg, a.log, db, dataDir)
 
 	a.log.Success("启动", "%s v%s 已就绪，数据库 %s", AppName, AppVersion, filepath.Join(dataDir, "clear.db"))

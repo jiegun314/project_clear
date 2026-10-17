@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Input, Button, Space, Tag, Tooltip, Select } from 'antd';
+import { Modal, Input, Button, Space, Tag, Tooltip, Select, Alert } from 'antd';
 import { Search, FileDown, RefreshCw } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { useTableQuery } from '../hooks/useTableQuery';
@@ -9,7 +9,7 @@ import type { ExportResult } from '../types';
 import { DatasetTag } from './DatasetTag';
 
 export interface HistoryViewProps {
-  weekCode: string | null;
+  datasetId: number | null;
   /** Which of the week's three datasets this window is showing. */
   dataset?: string;
   onClose: () => void;
@@ -18,7 +18,7 @@ export interface HistoryViewProps {
    * 导出交给 App 统一执行：这样状态栏的进度与完成标记对历史数据窗口同样生效
    * （这里曾经直接调 api.export，进度事件落在任务包装之外，无人认领）。
    */
-  onExport: (mode: 'clean' | 'template') => Promise<ExportResult | null>;
+  onExport: (datasetId: number, mode: 'clean' | 'template') => Promise<ExportResult | null>;
   /**
    * 首次载入完成（拿到数据，或确认这一周没有数据）时回调一次。
    * App 用它收起点击后立刻盖上的全屏加载遮罩。
@@ -32,10 +32,9 @@ export interface HistoryViewProps {
  * backend, but the page size is deliberately larger than the main grid because
  * the brief asks for "all data" here.
  */
-export function HistoryView({ weekCode, dataset = 'merged', onClose, onExported, onExport, onReady }: HistoryViewProps) {
+export function HistoryView({ datasetId, dataset = 'merged', onClose, onExported, onExport, onReady }: HistoryViewProps) {
   const q = useTableQuery({
-    source: weekCode,
-    dataset,
+    datasetID: datasetId,
     defaultPageSize: 500,
     // 失败时保留原有行：这是这个窗口一直以来的行为。
     clearRowsOnError: false,
@@ -52,10 +51,10 @@ export function HistoryView({ weekCode, dataset = 'merged', onClose, onExported,
   });
 
   const doExport = async (mode: 'clean' | 'template') => {
-    if (!weekCode) return;
+    if (!datasetId) return;
     setExporting(true);
     try {
-      const res = await onExport(mode);
+      const res = await onExport(datasetId, mode);
       if (res) onExported(`已导出 ${res.rows} 行 × ${res.cols} 列 → ${res.destPath}`);
     } finally {
       setExporting(false);
@@ -64,7 +63,7 @@ export function HistoryView({ weekCode, dataset = 'merged', onClose, onExported,
 
   return (
     <Modal
-      open={Boolean(weekCode)}
+      open={Boolean(datasetId)}
       onCancel={onClose}
       width="94vw"
       style={{ top: 24 }}
@@ -73,6 +72,12 @@ export function HistoryView({ weekCode, dataset = 'merged', onClose, onExported,
           <span style={{ fontWeight: 600 }}>历史数据</span>
           <span style={{ color: JNJ.textMuted, fontWeight: 400, fontSize: 12 }}>·</span>
           <DatasetTag dataset={dataset} />
+          {q.header && <span style={{ color: JNJ.textMuted, fontWeight: 400, fontSize: 12 }}>v{q.header.version}</span>}
+          {q.header?.expired && (
+            <Tag style={{ background: JNJ.warningSoft, color: JNJ.warning, borderColor: '#F0DCB8' }}>
+              已过期
+            </Tag>
+          )}
           {q.header?.weekCode && (
             <>
               <Tag style={{ background: JNJ.red, color: '#fff', border: 'none' }}>
@@ -117,6 +122,14 @@ export function HistoryView({ weekCode, dataset = 'merged', onClose, onExported,
         </Space>,
       ]}
     >
+      {q.header?.expired && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 10 }}
+          title="该周已有更新的导入，整合已过期；这里显示的是上次整合结果。"
+        />
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <Input
           allowClear

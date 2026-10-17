@@ -1,9 +1,17 @@
--- CLEAR local database schema.
+-- CLEAR local database schema (v5).
 --
--- Two-stage design, as specified: an import or add action fills the staging
--- table so the merged data can be reviewed immediately, and pressing 整合
--- promotes it into a permanent per-week table named after the first week code
--- (2639 -> data_2639), overwriting any previous copy of that week.
+-- A week is built from two independent inputs and one integration:
+--
+--   dataset       one complete import of a Global or Local dataset, or the merged
+--                 result of an integration. Rows live in dataset_row, so every
+--                 version is a first-class snapshot.
+--   integration   the week's current combination of one Global, one Local and
+--                 the merged dataset produced from them.
+--
+-- A Global import is a *draft* while the user is still importing folder/add
+-- files; finishing it flips status to ready and assigns a version. Local files
+-- are a single import, so they are ready immediately. Drafts are discarded on
+-- startup.
 
 PRAGMA foreign_keys = ON;
 
@@ -36,28 +44,57 @@ CREATE TABLE IF NOT EXISTS dxf_style (
   payload  TEXT NOT NULL
 );
 
--- One row per import/add action.
-CREATE TABLE IF NOT EXISTS batch (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at     TEXT    NOT NULL,
-  action         TEXT    NOT NULL,              -- import | add
-  week_code      TEXT    NOT NULL,
-  week_start     TEXT    NOT NULL,
-  week_codes     TEXT    NOT NULL,              -- JSON array, workbook order
-  index_names    TEXT    NOT NULL,              -- JSON array of A..O headers
-  status         TEXT    NOT NULL,              -- staging | committed
-  file_total     INTEGER NOT NULL DEFAULT 0,
-  file_ok        INTEGER NOT NULL DEFAULT 0,
-  file_fail      INTEGER NOT NULL DEFAULT 0,
-  row_total      INTEGER NOT NULL DEFAULT 0,
-  row_kept       INTEGER NOT NULL DEFAULT 0,
-  param_snapshot TEXT,
-  template_id    INTEGER
+-- One row per completed (or in-progress) dataset.
+CREATE TABLE IF NOT EXISTS dataset (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  week_code    TEXT    NOT NULL,              -- 2639
+  week_start   TEXT    NOT NULL,
+  kind         TEXT    NOT NULL,              -- global | local | merged
+  version      INTEGER NOT NULL DEFAULT 0,    -- 0 for a draft, 1.. when ready
+  status       TEXT    NOT NULL,              -- draft | ready
+  row_count    INTEGER NOT NULL DEFAULT 0,
+  file_count   INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  week_codes   TEXT    NOT NULL,              -- JSON array, workbook order
+  index_names  TEXT    NOT NULL,              -- JSON array of A..O headers
+  imported_at  TEXT    NOT NULL,
+  params       TEXT,                          -- config snapshot at import time
+  base_id      INTEGER,                       -- draft copied from this dataset
+  merged_from_global INTEGER,
+  merged_from_local  INTEGER
 );
+-- At most one draft overall (the open Global import), and versions are unique
+-- per week and kind once a dataset is ready.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dataset_draft ON dataset(kind) WHERE status = 'draft';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dataset_version
+  ON dataset(week_code, kind, version) WHERE status = 'ready';
+CREATE INDEX IF NOT EXISTS idx_dataset_week ON dataset(week_code, kind, status, version DESC);
 
-CREATE TABLE IF NOT EXISTS batch_file (
+-- One row of a dataset, in the MPS layout: A..O plus the week values as JSON
+-- so a dataset carries its own column frame and can be compared with another
+-- version without rewriting tables.
+CREATE TABLE IF NOT EXISTS dataset_row (
+  dataset_id INTEGER NOT NULL REFERENCES dataset(id) ON DELETE CASCADE,
+  seq        INTEGER NOT NULL,
+  file_id    INTEGER,
+  file_name  TEXT,
+  src_row    INTEGER NOT NULL DEFAULT 0,
+  c1  TEXT, c2  TEXT, c3  TEXT, c4  TEXT, c5  TEXT,
+  c6  TEXT, c7  TEXT, c8  TEXT, c9  TEXT, c10 TEXT,
+  c11 TEXT, c12 TEXT, c13 TEXT, c14 TEXT, c15 TEXT,
+  weeks      TEXT NOT NULL,                   -- JSON array, aligned to week_codes
+  style_ids  TEXT NOT NULL,                   -- JSON array of interned ids
+  cf_id      INTEGER,
+  comments   TEXT,                            -- JSON object col -> text
+  cf_colors  TEXT,                            -- JSON array, aligned to weeks
+  PRIMARY KEY (dataset_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_dataset_row_dataset ON dataset_row(dataset_id, seq);
+
+-- One workbook of a dataset, for the 已导入文件 window.
+CREATE TABLE IF NOT EXISTS dataset_file (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  batch_id   INTEGER NOT NULL REFERENCES batch(id) ON DELETE CASCADE,
+  dataset_id INTEGER NOT NULL REFERENCES dataset(id) ON DELETE CASCADE,
   path       TEXT    NOT NULL,
   name       TEXT    NOT NULL,
   size       INTEGER NOT NULL DEFAULT 0,
@@ -65,34 +102,21 @@ CREATE TABLE IF NOT EXISTS batch_file (
   rows_total INTEGER NOT NULL DEFAULT 0,
   rows_kept  INTEGER NOT NULL DEFAULT 0,
   week_code  TEXT,
-  err        TEXT,
-  -- global | local: the workbook came from a global export or the local sheet.
-  dataset    TEXT    NOT NULL DEFAULT 'global'
+  err        TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_batch_file_batch ON batch_file(batch_id);
+CREATE INDEX IF NOT EXISTS idx_dataset_file_dataset ON dataset_file(dataset_id);
 
--- Staging rows. Exactly one batch is 'staging' at a time and its rows are
--- replaced on every import or add.
-CREATE TABLE IF NOT EXISTS stg_row (
-  batch_id  INTEGER NOT NULL REFERENCES batch(id) ON DELETE CASCADE,
-  seq       INTEGER NOT NULL,
-  file_id   INTEGER,
-  file_name TEXT,
-  src_row   INTEGER NOT NULL DEFAULT 0,
-  c1        TEXT, c2  TEXT, c3  TEXT, c4  TEXT, c5  TEXT,
-  c6        TEXT, c7  TEXT, c8  TEXT, c9  TEXT, c10 TEXT,
-  c11       TEXT, c12 TEXT, c13 TEXT, c14 TEXT, c15 TEXT,
-  weeks     TEXT    NOT NULL,                   -- JSON array, aligned to week_codes
-  style_ids TEXT    NOT NULL,                   -- JSON array of interned ids
-  cf_id     INTEGER,
-  comments  TEXT,                                -- JSON object col -> text
-  cf_colors TEXT,                                -- JSON array, aligned to weeks (条件格式算出的底色)
-  -- global | local | merged: the merged rows are what the grid shows once the
-  -- local sheet has been imported.
-  dataset   TEXT    NOT NULL DEFAULT 'global',
-  PRIMARY KEY (batch_id, dataset, seq)
+-- The week's current combination. One row per integrated week; re-integrating
+-- updates it to the newest ready versions. global_id/local_id stay nullable for
+-- weeks integrated by releases that predate local files.
+CREATE TABLE IF NOT EXISTS integration (
+  week_code     TEXT PRIMARY KEY,
+  global_id     INTEGER REFERENCES dataset(id),
+  local_id      INTEGER REFERENCES dataset(id),
+  merged_id     INTEGER NOT NULL REFERENCES dataset(id),
+  integrated_at TEXT    NOT NULL,
+  params        TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_stg_row_batch ON stg_row(batch_id, seq);
 
 -- A stored copy of the first good source workbook, used as the export
 -- template so the exported file keeps the original look.
@@ -102,23 +126,4 @@ CREATE TABLE IF NOT EXISTS template (
   src_name    TEXT    NOT NULL,
   stored_path TEXT    NOT NULL,
   created_at  TEXT    NOT NULL
-);
-
--- Registry of committed weeks. A week holds three datasets: the global MPS rows,
--- the local MPS rows, and the merged result, so one week code appears three times
--- with a dataset each.
-CREATE TABLE IF NOT EXISTS archive (
-  week_code      TEXT NOT NULL,
-  dataset        TEXT NOT NULL DEFAULT 'merged',
-  week_start     TEXT    NOT NULL,
-  week_codes     TEXT    NOT NULL,
-  index_names    TEXT    NOT NULL,
-  row_count      INTEGER NOT NULL,
-  file_count     INTEGER NOT NULL,
-  batch_id       INTEGER,
-  committed_at   TEXT    NOT NULL,
-  template_id    INTEGER,
-  param_snapshot TEXT,
-  table_name     TEXT    NOT NULL,
-  PRIMARY KEY (week_code, dataset)
 );

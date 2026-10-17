@@ -1,65 +1,55 @@
 package main
 
 import (
-	"fmt"
-
-	"project_clear/internal/mps"
+	"project_clear/internal/service"
 	"project_clear/internal/store"
 	"project_clear/internal/view"
 )
 
-// ---------------------------------------------------------------- data
+// ---------------------------------------------------------------- data grid
 
-// QueryData returns one page of the merged data.
+// QueryData returns one page of a dataset.
 func (a *App) QueryData(q view.GridQuery) (out *store.GridResult, err error) {
 	defer a.recoverFault("QueryData", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
 	c := a.cfg.Get()
-	if q.PageSize <= 0 {
+	if q.PageSize <= 0 || q.PageSize > 5000 {
 		q.PageSize = c.PageSize
 	}
-	return a.svc.Query(store.Query{
-		Source: q.Source, Dataset: q.Dataset, Page: q.Page, PageSize: q.PageSize,
+	return a.svc.Query(store.DatasetQuery{
+		DatasetID: q.DatasetID, Page: q.Page, PageSize: q.PageSize,
 		Search: q.Search, SortField: q.SortField, SortDesc: q.SortDesc, Filters: q.Filters,
 	})
 }
 
-// GetGridHeader returns the column layout for a source.
-func (a *App) GetGridHeader(source, dataset string) (out *view.GridHeader, err error) {
+// GetGridHeader returns the column layout of one dataset.
+func (a *App) GetGridHeader(datasetID int64) (out *view.GridHeader, err error) {
 	defer a.recoverFault("GetGridHeader", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	out = view.NewGridHeader(source)
-	// The week-code check stays here so a crafted request is rejected before it
-	// reaches the store; resolving the source itself belongs to the service.
-	if source != "" && !store.ValidWeekCode(source) {
-		return nil, fmt.Errorf("非法周码 %q", source)
-	}
-	src, err := a.svc.GridSource(source, dataset)
+	src, err := a.svc.GridSource(datasetID)
 	if err != nil {
 		return nil, err
 	}
-	out.HasStaging = src.HasStaging
-	out.WeekCode = src.WeekCode
-	out.WeekStart = src.WeekStart
-	if src.IndexNames != nil {
-		out.IndexNames = src.IndexNames
+	if src.Dataset == nil {
+		return view.NewGridHeader(), nil
 	}
-	for _, c := range src.WeekCodes {
-		w, err := mps.ParseWeekCode(c)
-		if err != nil {
-			return nil, err
-		}
-		out.Weeks = append(out.Weeks, w)
-	}
-	return out, nil
+	d := src.Dataset
+	return (&view.GridHeader{
+		DatasetID: d.ID, Kind: d.Kind, Version: d.Version,
+		WeekCode: d.WeekCode, WeekStart: d.WeekStart,
+		IndexNames: d.IndexNames, Weeks: src.WeekCodes,
+		Total: d.RowCount, Expired: src.Expired,
+	}).NonNil(), nil
 }
 
-// GetArchive lists committed weeks.
-func (a *App) GetArchive() (out []store.ArchiveEntry, err error) {
+// ---------------------------------------------------------------- archive
+
+// GetArchive lists the integrated weeks as their three dataset entries.
+func (a *App) GetArchive() (out []service.ArchiveEntry, err error) {
 	defer a.recoverFault("GetArchive", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
@@ -67,7 +57,7 @@ func (a *App) GetArchive() (out []store.ArchiveEntry, err error) {
 	return a.svc.Archive()
 }
 
-// GetYears lists the years that have committed weeks.
+// GetYears lists the years that have an integrated week.
 func (a *App) GetYears() (out []int, err error) {
 	defer a.recoverFault("GetYears", &err)
 	if err := a.ready(); err != nil {
@@ -76,7 +66,7 @@ func (a *App) GetYears() (out []int, err error) {
 	return a.svc.Years()
 }
 
-// GetWeeks lists committed week numbers for a year.
+// GetWeeks lists the ISO weeks of a year that have an integration.
 func (a *App) GetWeeks(year int) (out []int, err error) {
 	defer a.recoverFault("GetWeeks", &err)
 	if err := a.ready(); err != nil {

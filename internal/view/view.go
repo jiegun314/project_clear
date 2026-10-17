@@ -2,14 +2,13 @@
 //
 // They live outside package main so the binding surface can be tested: every one
 // of these crosses Wails' JSON round trip, and a value that does not survive it
-// (a nil slice becoming null, a time.Time becoming an opaque object) otherwise
-// fails only inside the webview, at render time.
+// (a nil slice becoming null) otherwise fails only inside the webview.
 package view
 
 import (
 	"project_clear/internal/config"
 	"project_clear/internal/mps"
-	"project_clear/internal/store"
+	"project_clear/internal/service"
 )
 
 // AppInfo describes the application for the About window.
@@ -24,14 +23,52 @@ type AppInfo struct {
 	Platform   string `json:"platform"`
 }
 
-// Status backs the status bar.
+// Status backs the status bar and the workspace strip: the draft, the two
+// completed inputs, and the week's integration (including whether a newer
+// import has made it expired).
 type Status struct {
-	HasStaging    bool   `json:"hasStaging"`
-	WeekCode      string `json:"weekCode"`
-	WeekStart     string `json:"weekStart"`
-	StagedRows    int    `json:"stagedRows"`
-	ArchivedWeeks int    `json:"archivedWeeks"`
-	ArchivedRows  int    `json:"archivedRows"`
+	HasDraft   bool   `json:"hasDraft"`
+	DraftID    int64  `json:"draftId"`
+	DraftWeek  string `json:"draftWeek"`
+	DraftRows  int    `json:"draftRows"`
+	DraftFiles int    `json:"draftFiles"`
+	DraftFail  int    `json:"draftFailed"`
+
+	HasGlobal     bool   `json:"hasGlobal"`
+	GlobalID      int64  `json:"globalId"`
+	GlobalWeek    string `json:"globalWeek"`
+	GlobalRows    int    `json:"globalRows"`
+	GlobalFiles   int    `json:"globalFiles"`
+	GlobalVersion int    `json:"globalVersion"`
+	GlobalAt      string `json:"globalAt"`
+
+	HasLocal     bool   `json:"hasLocal"`
+	LocalID      int64  `json:"localId"`
+	LocalWeek    string `json:"localWeek"`
+	LocalRows    int    `json:"localRows"`
+	LocalFiles   int    `json:"localFiles"`
+	LocalVersion int    `json:"localVersion"`
+	LocalAt      string `json:"localAt"`
+	// LocalFileName is the single Local workbook, shown in the status strip:
+	// Local has no per-file list because one import is the whole dataset.
+	LocalFileName string `json:"localFileName"`
+
+	HasIntegration     bool   `json:"hasIntegration"`
+	IntegrationID      int64  `json:"integrationId"`
+	IntegrationWeek    string `json:"integrationWeek"`
+	IntegrationRows    int    `json:"integrationRows"`
+	IntegrationAt      string `json:"integrationAt"`
+	IntegrationExpired bool   `json:"integrationExpired"`
+
+	ActiveWeek   string `json:"activeWeek"`
+	Unintegrated bool   `json:"unintegrated"`
+	// CanDiscardWeek is true when the week has imports the integration does not
+	// include, so "丢弃本周导入" has something to remove.
+	CanDiscardWeek bool `json:"canDiscardWeek"`
+
+	ArchivedWeeks int `json:"archivedWeeks"`
+	ArchivedRows  int `json:"archivedRows"`
+
 	ReadColumns   int    `json:"readColumns"`
 	LOCFilter     string `json:"locFilter"`
 	PageSize      int    `json:"pageSize"`
@@ -39,60 +76,53 @@ type Status struct {
 	ExportMode    string `json:"exportMode"`
 	Database      string `json:"database"`
 	LastAction    string `json:"lastAction"`
-	// HasGlobal / HasLocal say which of the two inputs the workbench holds (or,
-	// after 整合, which the newest week holds). The grid shows one at a time and
-	// the toolbar's 整合 waits for both.
-	HasGlobal bool `json:"hasGlobal"`
-	HasLocal  bool `json:"hasLocal"`
-	// GlobalRows / LocalRows are the row counts of the two inputs; LastDataset is
-	// the side whose import ran most recently, so the grid can reopen there.
-	GlobalRows  int    `json:"globalRows"`
-	LocalRows   int    `json:"localRows"`
-	LastDataset string `json:"lastDataset"`
 }
 
 // CommitResult reports the outcome of 整合.
 type CommitResult struct {
 	WeekCode    string `json:"weekCode"`
 	WeekStart   string `json:"weekStart"`
-	TableName   string `json:"tableName"`
-	RowCount    int    `json:"rowCount"`
+	MergedID    int64  `json:"mergedId"`
+	GlobalID    int64  `json:"globalId"`
+	LocalID     int64  `json:"localId"`
+	MergedRows  int    `json:"mergedRows"`
+	GlobalRows  int    `json:"globalRows"`
+	LocalRows   int    `json:"localRows"`
+	GlobalVer   int    `json:"globalVersion"`
+	LocalVer    int    `json:"localVersion"`
+	MergedVer   int    `json:"mergedVersion"`
 	FileCount   int    `json:"fileCount"`
 	CommittedAt string `json:"committedAt"`
 	Overwrote   bool   `json:"overwrote"`
-	// The three datasets 整合 wrote, so the summary reports what went into the
-	// database rather than only the merged row count.
-	MergedRows int `json:"mergedRows"`
-	GlobalRows int `json:"globalRows"`
-	LocalRows  int `json:"localRows"`
+	WasExpired  bool   `json:"wasExpired"`
 }
 
-// StagingFilesView backs the toolbar's 已导入文件 button: which workbooks are in
-// the integration list right now and how many rows they brought in. 清空 leaves
-// the list empty again.
-type StagingFilesView struct {
-	HasStaging bool `json:"hasStaging"`
-	FileCount  int  `json:"fileCount"`
-	RowCount   int  `json:"rowCount"`
-	Failed     int  `json:"failedCount"`
-	// BatchState is "staging" while the list is still waiting for 整合 and
-	// "committed" when it is the record of the batch that was just integrated.
-	BatchState string                   `json:"batchState"`
-	Files      []store.StagedFileDetail `json:"files"`
-}
-
-// ClearStagingResult reports what 清空 removed.
-type ClearStagingResult struct {
+// DiscardWeekResult reports 丢弃本周导入.
+type DiscardWeekResult struct {
 	WeekCode string `json:"weekCode"`
-	// Files is how many imported workbooks were discarded — the summary the user
-	// sees after 清空 names the file count as well as the row count.
-	Files int `json:"files"`
-	Rows  int `json:"rows"`
+	Datasets int    `json:"datasets"`
+}
+
+// FilesView backs the 已导入文件 window: the workbooks of the current draft or
+// completed Global plus the current Local.
+type FilesView struct {
+	Files []service.FileWithDataset `json:"files"`
+	// HasDraft says the Global side shown here is still being assembled.
+	HasDraft bool `json:"hasDraft"`
+	// FileCount/RowCount/FailedCount are the dataset totals. They matter for a
+	// week migrated from v4: that release kept the counts but not the per-file
+	// rows, so the table is empty while the totals are not.
+	FileCount   int    `json:"fileCount"`
+	RowCount    int    `json:"rowCount"`
+	FailedCount int    `json:"failedCount"`
+	Note        string `json:"note,omitempty"`
 }
 
 // ExportResult reports the outcome of 导出.
 type ExportResult struct {
 	DestPath     string `json:"destPath"`
+	DatasetID    int64  `json:"datasetId"`
+	WeekCode     string `json:"weekCode"`
 	Mode         string `json:"mode"`
 	Rows         int    `json:"rows"`
 	Cols         int    `json:"cols"`
@@ -103,19 +133,16 @@ type ExportResult struct {
 	SizeBytes    int64  `json:"sizeBytes"`
 	PreservedVBA bool   `json:"preservedVba"`
 	DurationMS   int64  `json:"durationMs"`
-	// Sheets is 1 for the single-sheet report and 3 for the MPS/Local/Global
-	// bundle, so the notice can say which kind of file was written.
-	Sheets int `json:"sheets"`
+	Sheets       int    `json:"sheets"`
+	// Expired says a re-import has superseded the integration this file came from.
+	Expired bool `json:"expired"`
 }
 
 // GridQuery is the data-grid request.
 type GridQuery struct {
-	// Source is "" for the staging area or a week code such as "2639".
-	Source string `json:"source"`
-	// Dataset picks which of a week's three datasets to read: global, local or
-	// merged. Empty means the merged result, which is what the grid showed before
-	// the datasets existed.
-	Dataset   string            `json:"dataset"`
+	// DatasetID is which dataset to read: a draft, a completed Global/Local, or
+	// the merged result of an integration.
+	DatasetID int64             `json:"datasetId"`
 	Page      int               `json:"page"`
 	PageSize  int               `json:"pageSize"`
 	Search    string            `json:"search"`
@@ -126,13 +153,15 @@ type GridQuery struct {
 
 // GridHeader describes the columns the grid must render.
 type GridHeader struct {
-	Source     string     `json:"source"`
+	DatasetID  int64      `json:"datasetId"`
+	Kind       string     `json:"kind"`
+	Version    int        `json:"version"`
 	WeekCode   string     `json:"weekCode"`
 	WeekStart  string     `json:"weekStart"`
 	IndexNames []string   `json:"indexNames"`
 	Weeks      []mps.Week `json:"weeks"`
 	Total      int        `json:"total"`
-	HasStaging bool       `json:"hasStaging"`
+	Expired    bool       `json:"expired"`
 }
 
 // ConfigView is the settings payload.
@@ -141,26 +170,17 @@ type ConfigView struct {
 	Path   string        `json:"path"`
 }
 
-// The list fields below are created empty rather than left nil.
-//
-// Wails marshals every return value with encoding/json, which turns a nil slice
-// into null — and the first render walked those arrays, so an empty header that
-// arrived as null took the window down with a blank page. Seeding them here
-// rather than at each call site is what makes the rule checkable from a test.
-
 // NewGridHeader returns a header with its list fields initialised.
-func NewGridHeader(source string) *GridHeader {
-	return &GridHeader{Source: source, IndexNames: []string{}, Weeks: []mps.Week{}}
+func NewGridHeader() *GridHeader {
+	return &GridHeader{IndexNames: []string{}, Weeks: []mps.Week{}}
 }
 
-// NewStagingFilesView returns a file list that is empty, not null.
-func NewStagingFilesView() *StagingFilesView {
-	return &StagingFilesView{Files: []store.StagedFileDetail{}}
+// NewFilesView returns a file list that is empty, not null.
+func NewFilesView() *FilesView {
+	return &FilesView{Files: []service.FileWithDataset{}}
 }
 
-// NonNil replaces every nil slice on the payload with an empty one. It is the
-// belt-and-braces path for the values built from stored data, where a nil slice
-// is otherwise easy to hand back by accident.
+// NonNil replaces every nil slice on the payload with an empty one.
 func (h *GridHeader) NonNil() *GridHeader {
 	if h.IndexNames == nil {
 		h.IndexNames = []string{}
@@ -172,9 +192,9 @@ func (h *GridHeader) NonNil() *GridHeader {
 }
 
 // NonNil replaces a nil file list with an empty one.
-func (v *StagingFilesView) NonNil() *StagingFilesView {
+func (v *FilesView) NonNil() *FilesView {
 	if v.Files == nil {
-		v.Files = []store.StagedFileDetail{}
+		v.Files = []service.FileWithDataset{}
 	}
 	return v
 }

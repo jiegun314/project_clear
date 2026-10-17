@@ -69,7 +69,7 @@ func TestShutdownClosesTheDatabase(t *testing.T) {
 	a.shutdown(context.Background())
 
 	// Any query now fails, which is how "the handle was released" shows up.
-	if _, err := db.LoadStaging(); err == nil {
+	if _, err := db.ListIntegrations(); err == nil {
 		t.Error("the database is still usable after shutdown")
 	}
 }

@@ -32,7 +32,7 @@ const metaSchemaVersion = "schema_version"
 
 // currentSchemaVersion is the schema this release expects. It is bumped only
 // when schemaMigrations gains a step at the end.
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // annotationColumns are the per-cell extras added after 1.0. Both are nullable
 // TEXT: a database that predates them simply has no values.
@@ -42,7 +42,9 @@ var annotationColumns = []string{"comments", "cf_colors"}
 // migration step can run inside the transaction that applies it.
 type sqlQueryer interface {
 	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
 	Exec(query string, args ...any) (sql.Result, error)
+	Prepare(query string) (*sql.Stmt, error)
 }
 
 // schemaMigrations are applied in order. Index i upgrades a database at version
@@ -53,6 +55,7 @@ var schemaMigrations = []func(sqlQueryer) error{
 	purgeCommittedStagingRows, // 1 -> 2
 	addArchiveDataset,         // 2 -> 3
 	addStagingDataset,         // 3 -> 4
+	addDatasetModel,           // 4 -> 5
 }
 
 // Store owns the database handle.

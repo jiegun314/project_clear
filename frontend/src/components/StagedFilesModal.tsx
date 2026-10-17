@@ -1,37 +1,54 @@
 import { Modal, Table, Tag, Tooltip, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { JNJ } from '../theme/jnj';
-import type { StagedFile, StagingFilesView } from '../types';
+import type { FileWithDataset, FilesView } from '../types';
 
 export interface StagedFilesModalProps {
   open: boolean;
-  view: StagingFilesView | null;
+  view: FilesView | null;
   onClose: () => void;
 }
 
+function DatasetLabel({ dataset }: { dataset: string }) {
+  return (
+    <Tag
+      style={{
+        margin: 0,
+        padding: '0 6px',
+        fontSize: 11,
+        lineHeight: '18px',
+        background: JNJ.surface,
+        borderColor: JNJ.border,
+        color: JNJ.text,
+      }}
+    >
+      {dataset}
+    </Tag>
+  );
+}
+
 /**
- * The list behind 已导入文件: every workbook that has been imported or added
- * and is waiting to be integrated, with the number of rows it contributed.
- * 清空 empties it, and re-adding a file replaces its line instead of adding a
- * second one.
+ * The list behind 已导入文件: the workbooks of the current Global draft (or the
+ * completed Global) and of the Local dataset, with the rows each contributed.
  */
 export function StagedFilesModal({ open, view, onClose }: StagedFilesModalProps) {
   const files = view?.files ?? [];
-  const columns: ColumnsType<StagedFile> = [
+  const okFiles = files.filter((f) => f.status === 'ok');
+  // Prefer the dataset totals: a migrated week has no per-file rows, and a draft
+  // with a failed file must still show the counts the status strip uses.
+  const rows = view?.rowCount ?? okFiles.reduce((n, f) => n + f.rowsKept, 0);
+  const fileCount = view?.fileCount ?? okFiles.length;
+  const failed = view?.failedCount ?? files.length - okFiles.length;
+
+  const columns: ColumnsType<FileWithDataset> = [
     {
-      title: '序号',
-      key: 'index',
-      width: 56,
-      align: 'center',
-      render: (_v, _row, index) => (
-        <span style={{ color: JNJ.textMuted, fontVariantNumeric: 'tabular-nums' }}>
-          {index + 1}
-        </span>
-      ),
+      title: '数据集',
+      dataIndex: 'dataset',
+      key: 'dataset',
+      width: 130,
+      render: (d: string) => <DatasetLabel dataset={d} />,
     },
     {
-      // Only the header is centred here: the name itself reads best left
-      // aligned and gets all the room the two narrow columns do not need.
       title: <span style={{ display: 'block', textAlign: 'center' }}>文件名</span>,
       dataIndex: 'name',
       key: 'name',
@@ -49,30 +66,36 @@ export function StagedFilesModal({ open, view, onClose }: StagedFilesModalProps)
       width: 88,
       align: 'center',
       render: (n: number, row) =>
-        row.status === 'ok' ? (
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{n.toLocaleString()}</span>
-        ) : (
-          '—'
-        ),
+        row.status === 'ok' ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{n.toLocaleString()}</span> : '—',
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 76,
+      width: 86,
       align: 'center',
-      render: (s: string, row) =>
-        s === 'ok' ? (
+      render: (s: string, row) => {
+        if (s !== 'ok') {
+          return (
+            <Tooltip title={row.err}>
+              <Tag color="red" style={{ margin: 0 }}>
+                读取失败
+              </Tag>
+            </Tooltip>
+          );
+        }
+        // While the Global import is still a draft every readable workbook is
+        // 导入中; only 完成 Global 导入 makes them 已导入.
+        return view?.hasDraft ? (
+          <Tag color="gold" style={{ margin: 0 }}>
+            导入中
+          </Tag>
+        ) : (
           <Tag color="green" style={{ margin: 0 }}>
             已导入
           </Tag>
-        ) : (
-          <Tooltip title={row.err}>
-            <Tag color="red" style={{ margin: 0 }}>
-              读取失败
-            </Tag>
-          </Tooltip>
-        ),
+        );
+      },
     },
   ];
 
@@ -83,40 +106,38 @@ export function StagedFilesModal({ open, view, onClose }: StagedFilesModalProps)
       onOk={onClose}
       okText="关闭"
       cancelButtonProps={{ style: { display: 'none' } }}
-      width={700}
+      width={760}
       title={
         <span>
-          已导入文件
+          Global 文件清单
           <span style={{ marginLeft: 10, fontWeight: 400, fontSize: 12, color: JNJ.textMuted }}>
-            {view?.fileCount ?? 0} 个文件 · {(view?.rowCount ?? 0).toLocaleString()} 行
-            {view && view.failedCount > 0 ? ` · ${view.failedCount} 个读取失败` : ''}
+            {fileCount} 个文件 · {rows.toLocaleString()} 行
+            {failed > 0 ? ` · ${failed} 个读取失败` : ''}
+            {view?.hasDraft ? ' · Global 导入尚未完成' : ''}
           </span>
         </span>
       }
     >
-      {/* One table with a sticky header inside our own scroll box. antd's
-          scroll.y splits the header and the body into two tables, and the
-          body's scrollbar then eats into the last column so the 状态 header no
-          longer lines up with its cells. A single table cannot drift. */}
+      {view?.note && (
+        <div style={{ marginBottom: 8, fontSize: 12, color: JNJ.textMuted }}>{view.note}</div>
+      )}
       <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-        <Table<StagedFile>
+        <Table<FileWithDataset>
           size="small"
           bordered
           sticky
           tableLayout="fixed"
-          rowKey={(r) => r.path || r.name}
+          rowKey={(r) => `${r.dataset}:${r.path || r.name}`}
           columns={columns}
           dataSource={files}
           pagination={false}
-          locale={{
-            emptyText: (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有导入任何文件" />
-            ),
-          }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有导入文件" /> }}
         />
       </div>
       <div style={{ marginTop: 8, fontSize: 12, color: JNJ.textMuted }}>
-        同名文件只会有一行；再次导入或添加同名文件会直接覆盖它原来的数据（其余文件不受影响），点清空后本列表清空。
+        Global 导入是草稿：点「完成 Global 导入」后才会成为可整合的数据集；Local 一次导入即完成。
+        同名文件只会有一行，再次导入会覆盖它原来的数据。Local 文件一次导入即完成，
+        它的文件信息显示在状态条中，不在这里。
       </div>
     </Modal>
   );

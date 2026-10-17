@@ -15,19 +15,16 @@ export function StatusBar({
   status: Status | null;
   progress: TaskProgress | null;
 }) {
-  // The workbench holds up to two inputs; name the ones that are there rather
-  // than one combined row count that describes neither side.
-  const stagingParts: string[] = [];
-  if (status?.hasStaging) {
-    if (status.hasGlobal) stagingParts.push(`Global ${status.globalRows.toLocaleString()}`);
-    if (status.hasLocal) stagingParts.push(`Local ${status.localRows.toLocaleString()}`);
+  const staging: string[] = [];
+  if (status?.activeWeek) {
+    if (status.hasDraft) staging.push(`Global 导入中 ${status.draftRows.toLocaleString()}`);
+    else if (status.hasGlobal) staging.push(`Global v${status.globalVersion} ${status.globalRows.toLocaleString()}`);
+    if (status.hasLocal) staging.push(`Local v${status.localVersion} ${status.localRows.toLocaleString()}`);
   }
   const items: { label: string; value: string; tip?: string }[] = [
     {
-      label: '临时数据',
-      value: status?.hasStaging
-        ? `${status.weekCode} · ${stagingParts.length ? stagingParts.join(' / ') : '空'}`
-        : '无',
+      label: '当前周',
+      value: status?.activeWeek ? `${status.activeWeek} · ${staging.join(' / ') || '空'}` : '无',
     },
     {
       label: '已整合',
@@ -54,7 +51,6 @@ export function StatusBar({
     >
       {progress &&
         (progress.finished ? (
-          // 任务完成后留在状态栏的是绿色对勾，而不是红色转圈。
           <span
             style={{
               color: JNJ.success,

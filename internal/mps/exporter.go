@@ -86,6 +86,8 @@ type ExportStats struct {
 	// Sheets is how many worksheets the export wrote: 1 for the template report,
 	// 3 for the MPS / Local / Global bundle.
 	Sheets int `json:"sheets"`
+	// Expired says the exported integration was superseded by a newer import.
+	Expired bool `json:"expired"`
 }
 
 // warn records a detail that could not be reproduced.

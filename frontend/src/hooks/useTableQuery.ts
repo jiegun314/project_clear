@@ -11,13 +11,10 @@ export interface SortState {
 
 export interface TableQueryOptions {
   /**
-   * What to read. `null` means nothing is selected: no request is made and the
-   * header is cleared. The main grid uses `''` for the staging area, which is a
-   * selection like any other.
+   * Which dataset to read. `null` (or 0) means nothing is selected: no request
+   * is made and the header is cleared.
    */
-  source: string | null;
-  /** Which of a week's three datasets to read; ignored for the staging area. */
-  dataset?: string;
+  datasetID: number | null;
   /** The page size the caller starts from, and the one it is reset to when this changes. */
   defaultPageSize: number;
   /** Bumped by the caller to force a reload without changing anything else. */
@@ -64,7 +61,7 @@ export interface TableQuery {
  * above and in how they are laid out, not in how they read data.
  */
 export function useTableQuery(opt: TableQueryOptions): TableQuery {
-  const { source, dataset = '', defaultPageSize, reloadToken = 0, clearRowsOnError = false } = opt;
+  const { datasetID, defaultPageSize, reloadToken = 0, clearRowsOnError = false } = opt;
 
   const [header, setHeader] = useState<GridHeader | null>(null);
   const [rows, setRows] = useState<GridRow[]>([]);
@@ -85,12 +82,12 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
     onSettledRef.current = opt.onSettled;
   }, [opt.onSettled]);
 
-  // Which source has already been announced, so switching weeks announces again
-  // while paging and sorting do not.
-  const settledFor = useRef<string | null>(null);
-  const notifySettled = useCallback((forSource: string | null) => {
-    if (settledFor.current === forSource) return;
-    settledFor.current = forSource;
+  // Which dataset has already been announced, so switching datasets announces
+  // again while paging and sorting do not.
+  const settledFor = useRef<number | null>(null);
+  const notifySettled = useCallback((forDataset: number | null) => {
+    if (settledFor.current === forDataset) return;
+    settledFor.current = forDataset;
     onSettledRef.current?.();
   }, []);
 
@@ -101,21 +98,21 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
 
   useEffect(() => {
     setPage(1);
-  }, [source, debounced, sort.field, sort.desc, reloadToken]);
+  }, [datasetID, debounced, sort.field, sort.desc, reloadToken]);
 
   useEffect(() => {
     setPageSize(defaultPageSize);
   }, [defaultPageSize]);
 
   useEffect(() => {
-    if (source === null) {
+    if (!datasetID) {
       setHeader(null);
       return;
     }
     let alive = true;
     settledFor.current = null;
     api
-      .getGridHeader(source, dataset)
+      .getGridHeader(datasetID)
       .then((h) => {
         if (alive) setHeader(h);
       })
@@ -124,24 +121,23 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
         setHeader(null);
         // Without a header there is no query to come, so nothing else would
         // settle and the caller's cover would spin forever.
-        notifySettled(source);
+        notifySettled(datasetID);
       });
     return () => {
       alive = false;
     };
     // reloadToken belongs here as well as in the page reset: after an import the
-    // staging area gains its week columns, and the header fetched while it was
-    // empty would leave the grid with no columns and no rows to show.
-  }, [source, dataset, notifySettled, reloadToken]);
+    // dataset may have gained row, and the header fetched while it was empty
+    // would leave the grid with no columns and no rows to show.
+  }, [datasetID, notifySettled, reloadToken]);
 
   const load = useCallback(async () => {
-    if (source === null || !header) return;
+    if (!datasetID || !header) return;
     const id = ++reqId.current;
     setLoading(true);
     try {
       const res = await api.queryData({
-        source,
-        dataset,
+        datasetId: datasetID,
         page,
         pageSize,
         search: debounced,
@@ -163,10 +159,10 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
     } finally {
       if (id === reqId.current) {
         setLoading(false);
-        notifySettled(source);
+        notifySettled(datasetID);
       }
     }
-  }, [source, dataset, header, page, pageSize, debounced, sort, notifySettled, clearRowsOnError]);
+  }, [datasetID, header, page, pageSize, debounced, sort, notifySettled, clearRowsOnError]);
 
   useEffect(() => {
     // reloadToken is the parent's "look again" signal: the query itself does not

@@ -8,13 +8,15 @@ export interface Week {
 }
 
 export interface GridHeader {
-  source: string;
+  datasetId: number;
+  kind: string;
+  version: number;
   weekCode: string;
   weekStart: string;
   indexNames: string[];
   weeks: Week[];
   total: number;
-  hasStaging: boolean;
+  expired: boolean;
 }
 
 export interface GridRow {
@@ -41,9 +43,7 @@ export interface GridResult {
 }
 
 export interface GridQuery {
-  source: string;
-  /** Which of a week's three datasets: global, local or merged ("" = merged). */
-  dataset: string;
+  datasetId: number;
   page: number;
   pageSize: number;
   search: string;
@@ -76,14 +76,35 @@ export interface ImportResult {
   files: FileResult[];
   warnings: string[];
   durationMs: number;
-  /** Staged files whose data this action replaced (matched by file name). */
+  /** Draft workbooks this add replaced (matched by file name). */
   replaced?: string[];
-  /** 本地 MPS import: how many rows the local file brought in. */
+  /** True for a Global import that is not finished yet. */
+  draft: boolean;
+  datasetId: number;
   localRows: number;
+  version: number;
+  expired: boolean;
+  rowCount: number;
+  fileCount: number;
 }
 
-/** One workbook of the current 整合清单. */
-export interface StagedFile {
+export interface FinishResult {
+  datasetId: number;
+  weekCode: string;
+  weekStart: string;
+  version: number;
+  rowCount: number;
+  fileCount: number;
+  failedCount: number;
+  weekCodes: Week[];
+  indexNames: string[];
+  importedAt: string;
+  expired: boolean;
+  integrationAt?: string;
+}
+
+/** One workbook of the current draft/Global or Local import. */
+export interface FileWithDataset {
   name: string;
   path: string;
   size: number;
@@ -92,42 +113,47 @@ export interface StagedFile {
   rowsKept: number;
   weekCode: string;
   err?: string;
+  /** "Global（导入中）" | "Global" | "Local" */
+  dataset: string;
+  version: number;
 }
 
-/** What the toolbar's 已导入文件 button shows. */
-export interface StagingFilesView {
-  hasStaging: boolean;
+export interface FilesView {
+  files: FileWithDataset[];
+  hasDraft: boolean;
   fileCount: number;
   rowCount: number;
   failedCount: number;
-  /** "staging" while it still waits for 整合, "committed" after it. */
-  batchState?: string;
-  files: StagedFile[];
+  note?: string;
 }
 
 export interface CommitResult {
   weekCode: string;
   weekStart: string;
-  tableName: string;
-  rowCount: number;
-  fileCount: number;
-  committedAt: string;
-  overwrote: boolean;
-  /** The three datasets 整合 wrote, for the summary. */
+  mergedId: number;
+  globalId: number;
+  localId: number;
   mergedRows: number;
   globalRows: number;
   localRows: number;
+  globalVersion: number;
+  localVersion: number;
+  mergedVersion: number;
+  fileCount: number;
+  committedAt: string;
+  overwrote: boolean;
+  wasExpired: boolean;
 }
 
-export interface ClearResult {
+export interface DiscardWeekResult {
   weekCode: string;
-  /** How many imported workbooks were discarded. */
-  files: number;
-  rows: number;
+  datasets: number;
 }
 
 export interface ExportResult {
   destPath: string;
+  datasetId: number;
+  weekCode: string;
   mode: string;
   rows: number;
   cols: number;
@@ -138,8 +164,8 @@ export interface ExportResult {
   sizeBytes: number;
   preservedVba: boolean;
   durationMs: number;
-  /** 1 for the single-sheet report, 3 for the MPS/Local/Global bundle. */
   sheets: number;
+  expired: boolean;
 }
 
 export interface ArchiveEntry {
@@ -147,19 +173,16 @@ export interface ArchiveEntry {
   weekStart: string;
   year: number;
   weekNo: number;
-  weekCodes: string[];
-  indexNames: string[];
+  dataset: string;
+  datasetId: number;
+  version: number;
   rowCount: number;
   fileCount: number;
-  batchId: number;
   committedAt: string;
-  tableName: string;
-  /** global, local or merged — one week holds one entry per dataset. */
-  dataset: string;
+  expired: boolean;
 }
 
 export interface AppConfig {
-  /** Schema marker so an older settings file can be brought forward once. */
   configVersion: number;
   readColumns: number;
   locFilter: string;
@@ -183,12 +206,44 @@ export interface LogEntry {
 }
 
 export interface Status {
-  hasStaging: boolean;
-  weekCode: string;
-  weekStart: string;
-  stagedRows: number;
+  hasDraft: boolean;
+  draftId: number;
+  draftWeek: string;
+  draftRows: number;
+  draftFiles: number;
+  draftFailed: number;
+
+  hasGlobal: boolean;
+  globalId: number;
+  globalWeek: string;
+  globalRows: number;
+  globalFiles: number;
+  globalVersion: number;
+  globalAt: string;
+
+  hasLocal: boolean;
+  localId: number;
+  localWeek: string;
+  localRows: number;
+  localFiles: number;
+  localVersion: number;
+  localAt: string;
+  localFileName: string;
+
+  hasIntegration: boolean;
+  integrationId: number;
+  integrationWeek: string;
+  integrationRows: number;
+  integrationAt: string;
+  integrationExpired: boolean;
+
+  activeWeek: string;
+  unintegrated: boolean;
+  canDiscardWeek: boolean;
+
   archivedWeeks: number;
   archivedRows: number;
+
   readColumns: number;
   locFilter: string;
   pageSize: number;
@@ -196,13 +251,6 @@ export interface Status {
   exportMode: string;
   database: string;
   lastAction: string;
-  /** Which of the two inputs the workbench (or the newest week) holds. */
-  hasGlobal: boolean;
-  hasLocal: boolean;
-  globalRows: number;
-  localRows: number;
-  /** The side imported most recently; the grid reopens there. */
-  lastDataset: string;
 }
 
 export interface AppInfo {

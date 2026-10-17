@@ -5,15 +5,15 @@ import (
 	"path/filepath"
 
 	"project_clear/internal/service"
-	"project_clear/internal/store"
 	"project_clear/internal/view"
 
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// ---------------------------------------------------------------- import
+// ---------------------------------------------------------------- imports
 
-// ImportFolder asks for a folder and imports every workbook inside it.
+// ImportFolder asks for a folder and writes every workbook inside it into a
+// fresh Global draft.
 func (a *App) ImportFolder() (out *service.ImportResult, err error) {
 	defer a.recoverFault("ImportFolder", &err)
 	if err := a.ready(); err != nil {
@@ -24,7 +24,7 @@ func (a *App) ImportFolder() (out *service.ImportResult, err error) {
 		return nil, err
 	}
 	if len(picked) == 0 {
-		return nil, nil // cancelled
+		return nil, nil
 	}
 	dir := picked[0]
 	a.rememberDir(dir)
@@ -37,7 +37,7 @@ func (a *App) ImportFolder() (out *service.ImportResult, err error) {
 	return res, nil
 }
 
-// AddFiles asks for one or more workbooks and stages them.
+// AddFiles asks for one or more workbooks and adds them to the Global draft.
 func (a *App) AddFiles() (out *service.ImportResult, err error) {
 	defer a.recoverFault("AddFiles", &err)
 	if err := a.ready(); err != nil {
@@ -54,8 +54,6 @@ func (a *App) AddFiles() (out *service.ImportResult, err error) {
 	if len(paths) == 1 {
 		a.rememberDir(filepath.Dir(paths[0]))
 	}
-	// A file whose name is already in the list is replaced, not merged: the
-	// service does that without asking, and reports the names it overwrote.
 	res, err := a.svc.AddFiles(paths, a.progress)
 	if err != nil {
 		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
@@ -65,9 +63,24 @@ func (a *App) AddFiles() (out *service.ImportResult, err error) {
 	return res, nil
 }
 
-// ImportLocalMPS asks for one 本地 MPS workbook, checks its layout and merges it
-// into the staged global rows. A file that is not the local layout is refused
-// with the sheet, row and column that do not match.
+// FinishGlobalMPS completes the Global draft. confirmFailures is the caller's
+// acknowledgement that the failed workbooks listed in the 已导入文件 window are
+// acceptable.
+func (a *App) FinishGlobalMPS(confirmFailures bool) (out *service.FinishResult, err error) {
+	defer a.recoverFault("FinishGlobalMPS", &err)
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	res, err := a.svc.FinishGlobal(confirmFailures)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
+		return nil, err
+	}
+	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
+	return res, nil
+}
+
+// ImportLocalMPS imports the 本地 MPS workbook as a complete Local dataset.
 func (a *App) ImportLocalMPS() (out *service.ImportResult, err error) {
 	defer a.recoverFault("ImportLocalMPS", &err)
 	if err := a.ready(); err != nil {
@@ -91,96 +104,91 @@ func (a *App) ImportLocalMPS() (out *service.ImportResult, err error) {
 	return res, nil
 }
 
-// ---------------------------------------------------------------- commit
+// ---------------------------------------------------------------- integrate
 
-// Commit promotes the staged data into its permanent weekly table.
+// Commit combines the current Global and Local datasets into the week's
+// integration.
 func (a *App) Commit() (out *view.CommitResult, err error) {
 	defer a.recoverFault("Commit", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	entries, overwrote, err := a.svc.CommitEntries()
+	res, had, wasExpired, err := a.svc.Commit()
 	if err != nil {
 		return nil, err
 	}
-	res := &view.CommitResult{Overwrote: overwrote}
-	for _, e := range entries {
-		switch e.Dataset {
-		case store.DatasetMerged:
-			res.WeekCode, res.WeekStart, res.TableName = e.WeekCode, e.WeekStart, e.TableName
-			res.RowCount, res.CommittedAt = e.RowCount, e.CommittedAt
-			res.MergedRows, res.FileCount = e.RowCount, e.FileCount
-		case store.DatasetGlobal:
-			res.GlobalRows = e.RowCount
-		case store.DatasetLocal:
-			res.LocalRows = e.RowCount
-		}
-	}
-	if res.WeekCode == "" {
-		return nil, fmt.Errorf("整合没有生成整合结果")
-	}
-	return res, nil
+	return &view.CommitResult{
+		WeekCode: res.Merged.WeekCode, WeekStart: res.Merged.WeekStart,
+		MergedID: res.Merged.ID, GlobalID: res.Global.ID, LocalID: res.Local.ID,
+		MergedRows: res.Merged.RowCount, GlobalRows: res.Global.RowCount, LocalRows: res.Local.RowCount,
+		MergedVer: res.Merged.Version, GlobalVer: res.Global.Version, LocalVer: res.Local.Version,
+		FileCount: res.Merged.FileCount, CommittedAt: res.Integration.IntegratedAt,
+		Overwrote: had, WasExpired: wasExpired,
+	}, nil
 }
 
-// ------------------------------------------------------- staging file list
+// ---------------------------------------------------------------- workspace
 
-// GetStagingFiles lists the work set behind the toolbar's 已导入文件 button: the
-// files that were imported (or added), and — after 整合 — the same list as the
-// record of that import. It stays until 清空 or the next import.
-func (a *App) GetStagingFiles() (out *view.StagingFilesView, err error) {
-	defer a.recoverFault("GetStagingFiles", &err)
+// GetFiles lists the workbooks of the current draft/Global and Local imports.
+func (a *App) GetFiles() (out *view.FilesView, err error) {
+	defer a.recoverFault("GetFiles", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	out = view.NewStagingFilesView()
-	files, weekCode, state, err := a.svc.BatchFiles()
+	out = view.NewFilesView()
+	ws, err := a.svc.Workspace()
 	if err != nil {
 		return nil, err
 	}
-	if len(files) == 0 {
-		return out, nil
+	files, err := a.svc.Files()
+	if err != nil {
+		return nil, err
 	}
-	out.HasStaging = state == "staging"
-	out.BatchState = state
 	out.Files = files
-	for _, f := range files {
-		if f.Status == "ok" {
-			out.FileCount++
-			out.RowCount += f.RowsKept
-		} else {
-			out.Failed++
-		}
+	out.HasDraft = ws.Draft != nil
+	if out.Files == nil {
+		out.Files = []service.FileWithDataset{}
 	}
-	// While the workbench is open the file list's row total is the sum of the
-	// workbooks' own rows: the two sides have not been merged yet, so there is no
-	// single table to count. After 整合 the list is the record of the batch and the
-	// merged week's row count is the meaningful total.
-	if sum, err := a.svc.StagingSummary(); err == nil && !sum.HasStaging {
-		if entry, err := a.svc.ArchiveEntry(weekCode); err == nil && entry != nil {
-			out.RowCount = entry.RowCount
-		}
+	global := ws.Draft
+	if global == nil {
+		global = ws.Global
+	}
+	if global != nil {
+		out.FileCount += global.FileCount
+		out.RowCount += global.RowCount
+		out.FailedCount += global.FailedCount
+	}
+	if len(out.Files) == 0 && out.FileCount > 0 {
+		out.Note = "该周的数据由旧版本迁移而来，未保留逐文件清单；文件数、行数来自数据集记录。"
 	}
 	return out, nil
 }
 
-// ---------------------------------------------------------------- clear
+// ---------------------------------------------------------------- discard
 
-// ClearStaging drops every imported-but-unsaved row: the staging area and the
-// export template that came with it. Weeks already integrated are untouched.
-func (a *App) ClearStaging() (out *view.ClearStagingResult, err error) {
-	defer a.recoverFault("ClearStaging", &err)
+// DiscardDraft removes the open Global draft. Completed datasets and history
+// are untouched.
+func (a *App) DiscardDraft() (out *service.ImportResult, err error) {
+	defer a.recoverFault("DiscardDraft", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	sum, err := a.svc.StagingSummary()
+	return a.svc.DiscardDraft()
+}
+
+// DiscardWeekImports removes the active week's un-integrated imports. The
+// integration (history) is never touched.
+func (a *App) DiscardWeekImports(weekCode string) (out *view.DiscardWeekResult, err error) {
+	defer a.recoverFault("DiscardWeekImports", &err)
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	if weekCode == "" {
+		return nil, fmt.Errorf("没有要丢弃的导入")
+	}
+	n, err := a.svc.DiscardWeekImports(weekCode)
 	if err != nil {
 		return nil, err
 	}
-	// 清空 always runs: with no staging left it only ends the 已导入文件 list
-	// (the record of the batch that was just integrated).
-	rows, err := a.svc.ClearStaging()
-	if err != nil {
-		return nil, err
-	}
-	return &view.ClearStagingResult{WeekCode: sum.WeekCode, Files: sum.FileOK, Rows: rows}, nil
+	return &view.DiscardWeekResult{WeekCode: weekCode, Datasets: n}, nil
 }

@@ -3,47 +3,26 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import type {
   AppConfig,
+  CommitResult,
+  ExportResult,
+  FilesView,
+  FinishResult,
   GridHeader,
   GridResult,
   ImportResult,
-  StagingFilesView,
   Status,
 } from './types';
 
-// The shell's behaviour, pinned against the implementation as it stands so that
-// the state it holds can be moved into hooks without anything changing for the
-// user. These assertions are deliberately about what is on the screen — the
-// status bar's values, which dialog opened, the error that was reported, where
-// the split sits — and never about which hook holds what.
-//
-// Not covered here: the history loading overlay, because reaching it needs a
-// week selected in the archive panel's dropdown. HistoryView's own tests cover
-// the onReady signal the overlay waits for.
-
 vi.mock('./services/api', () => ({
   api: {
-    getStatus: vi.fn(),
-    getConfig: vi.fn(),
-    getStagingFiles: vi.fn(),
-    importFolder: vi.fn(),
-    importLocalMPS: vi.fn(),
-    exportBundle: vi.fn(),
-    addFiles: vi.fn(),
-    confirmAddFiles: vi.fn(),
-    commit: vi.fn(),
-    clearStaging: vi.fn(),
-    export: vi.fn(),
-    quit: vi.fn(),
-    getGridHeader: vi.fn(),
-    queryData: vi.fn(),
-    getArchive: vi.fn(),
-    getYears: vi.fn(),
-    getWeeks: vi.fn(),
-    getLogs: vi.fn(),
-    clearLogs: vi.fn(),
-    getAppInfo: vi.fn(),
-    saveConfig: vi.fn(),
-    resetConfig: vi.fn(),
+    getStatus: vi.fn(), getConfig: vi.fn(), getFiles: vi.fn(),
+    importFolder: vi.fn(), addFiles: vi.fn(), finishGlobalMPS: vi.fn(), importLocalMPS: vi.fn(),
+    commit: vi.fn(), discardDraft: vi.fn(), discardWeekImports: vi.fn(),
+    exportDataset: vi.fn(), exportBundle: vi.fn(), quit: vi.fn(),
+    getGridHeader: vi.fn(), queryData: vi.fn(),
+    getArchive: vi.fn(), getYears: vi.fn(), getWeeks: vi.fn(),
+    getLogs: vi.fn(), clearLogs: vi.fn(), getAppInfo: vi.fn(),
+    saveConfig: vi.fn(), resetConfig: vi.fn(),
   },
   hasBackend: vi.fn(() => true),
   onEvent: vi.fn(() => () => {}),
@@ -54,440 +33,271 @@ const mocked = vi.mocked(api);
 const mockedHasBackend = vi.mocked(hasBackend);
 
 const CONFIG: AppConfig = {
-  configVersion: 2,
-  readColumns: 20,
-  locFilter: 'WH_CNB',
-  pageSize: 200,
-  headerDisplay: 'twoRow',
-  exportMode: 'clean',
-  exportDir: '',
+  configVersion: 2, readColumns: 20, locFilter: 'WH_CNB', pageSize: 200,
+  headerDisplay: 'twoRow', exportMode: 'clean', exportDir: '',
 };
 
 const STATUS: Status = {
-  hasStaging: true,
-  weekCode: '2639',
-  weekStart: '2026-09-21',
-  stagedRows: 1736,
-  archivedWeeks: 1,
-  archivedRows: 1516,
-  readColumns: 20,
-  locFilter: 'WH_CNB',
-  pageSize: 200,
-  headerDisplay: 'twoRow',
-  exportMode: 'clean',
-  database: '/tmp/clear.db',
-  lastAction: '',
-  hasGlobal: true,
-  hasLocal: true,
-  globalRows: 1516,
-  localRows: 1736,
-  lastDataset: 'local',
+  hasDraft: false, draftId: 0, draftWeek: '', draftRows: 0, draftFiles: 0, draftFailed: 0,
+  hasGlobal: true, globalId: 11, globalWeek: '2639', globalRows: 1516, globalFiles: 13,
+  globalVersion: 2, globalAt: '2026-09-22 09:00:00',
+  hasLocal: true, localId: 12, localWeek: '2639', localRows: 1736, localFiles: 1,
+  localVersion: 1, localAt: '2026-09-22 10:00:00', localFileName: 'local.xlsx',
+  hasIntegration: false, integrationId: 0, integrationWeek: '', integrationRows: 0,
+  integrationAt: '', integrationExpired: false,
+  activeWeek: '2639', unintegrated: true, canDiscardWeek: true,
+  archivedWeeks: 0, archivedRows: 0,
+  readColumns: 20, locFilter: 'WH_CNB', pageSize: 200, headerDisplay: 'twoRow',
+  exportMode: 'clean', database: '/tmp/clear.db', lastAction: '',
 };
 
-const STAGED: StagingFilesView = {
-  hasStaging: true,
-  fileCount: 13,
-  rowCount: 1516,
-  failedCount: 0,
-  batchState: 'staging',
-  files: [],
+const DRAFT: Status = {
+  ...STATUS,
+  hasDraft: true, draftId: 10, draftWeek: '2639', draftRows: 1516, draftFiles: 13,
+  hasGlobal: false, globalId: 0, hasLocal: false, localId: 0,
+  unintegrated: true, canDiscardWeek: true,
 };
+
+const INTEGRATED: Status = {
+  ...STATUS,
+  hasIntegration: true, integrationId: 100, integrationWeek: '2639', integrationRows: 2580,
+  integrationAt: '2026-09-22 11:00:00', archivedWeeks: 1, archivedRows: 2580,
+  unintegrated: false, canDiscardWeek: false,
+};
+
+const BLANK: Status = {
+  ...STATUS,
+  hasGlobal: false, globalId: 0, globalWeek: '', globalRows: 0, globalFiles: 0,
+  globalVersion: 0, globalAt: '',
+  hasLocal: false, localId: 0, localWeek: '', localRows: 0, localFiles: 0,
+  localVersion: 0, localAt: '', localFileName: '',
+  activeWeek: '', unintegrated: false, canDiscardWeek: false,
+};
+
+const FILES: FilesView = { files: [], hasDraft: false, fileCount: 0, rowCount: 0, failedCount: 0 };
 
 const HEADER: GridHeader = {
-  source: '',
-  weekCode: '',
-  weekStart: '',
-  indexNames: [
-    'P5', 'P4', 'P3', 'P2', 'P1', 'MFG GROUP', 'MFG CLASS CODE', 'MFG DESCR',
-    'ITEM', 'US CATALOG', 'EU CATALOG', 'LOC', 'BO', 'OH', 'LOC',
-  ],
+  datasetId: 12, kind: 'local', version: 1, weekCode: '2639', weekStart: '2026-09-21',
+  indexNames: ['P5', 'P4', 'P3', 'P2', 'P1', 'MFG GROUP', 'MFG CLASS CODE', 'MFG DESCR',
+    'ITEM', 'US CATALOG', 'EU CATALOG', 'LOC', 'BO', 'OH', 'LOC'],
   weeks: [{ code: '2639', year: 26, weekNo: 39, start: '2026-09-21' }],
-  total: 0,
-  hasStaging: true,
+  total: 0, expired: false,
 };
 
-const EMPTY_RESULT: GridResult = { rows: [], total: 0, page: 1, pageSize: 200 };
+const EMPTY: GridResult = { rows: [], total: 0, page: 1, pageSize: 200 };
 
 const IMPORT_RESULT: ImportResult = {
-  action: 'import',
-  weekCode: '2639',
-  weekStart: '2026-09-21',
-  weekCodes: [],
-  indexNames: [],
-  total: 13,
-  ok: 13,
-  failed: 0,
-  rowsKept: 1516,
-  files: [],
-  warnings: [],
-  durationMs: 23714,
-  localRows: 0,
+  action: 'import', weekCode: '2639', weekStart: '2026-09-21', weekCodes: [], indexNames: [],
+  total: 13, ok: 13, failed: 0, rowsKept: 1516, files: [], warnings: [], durationMs: 23714,
+  draft: true, datasetId: 10, localRows: 0, version: 0, expired: false, rowCount: 1516, fileCount: 13,
 };
 
-const IMPORT_BUTTON = '导入 Global 文件夹：读取本周 MPS 导出的全部源文件';
-const ADD_BUTTON = '添加 Global 源文件：把漏掉的文件补进当前清单';
-const IMPORT_LOCAL_BUTTON = '导入本地 MPS 文件（Month End）：检查格式并写入 Local 数据';
-const EXPORT_BUTTON = '导出：整合后生成 MPS / Local / Global 三表文件';
-const COMMIT_BUTTON = '整合：合并 Global 与 Local，并写入永久周数据表';
-const QUIT_BUTTON = '退出程序';
+const FINISH_RESULT: FinishResult = {
+  datasetId: 11, weekCode: '2639', weekStart: '2026-09-21', version: 2, rowCount: 1516,
+  fileCount: 13, failedCount: 0, weekCodes: [], indexNames: [], importedAt: '2026-09-22 09:00:00',
+  expired: false,
+};
+
+const COMMIT_RESULT: CommitResult = {
+  weekCode: '2639', weekStart: '2026-09-21', mergedId: 100, globalId: 11, localId: 12,
+  mergedRows: 2580, globalRows: 1516, localRows: 1736, globalVersion: 2, localVersion: 1,
+  mergedVersion: 1, fileCount: 14, committedAt: '2026-09-22 11:00:00', overwrote: false,
+  wasExpired: false,
+};
+
+const EXPORT_RESULT: ExportResult = {
+  destPath: '/tmp/BW.xlsx', datasetId: 100, weekCode: '2639', mode: 'clean', rows: 2580,
+  cols: 17, comments: 0, cfRows: 0, stylesUsed: 0, dropped: 0, sizeBytes: 1000,
+  preservedVba: false, durationMs: 10, sheets: 3, expired: false,
+};
+
+const FINISH = '完成 Global 导入：把当前草稿定稿为可整合的数据集';
+const COMMIT = '整合：合并已完成的 Global 与 Local，写入永久整合记录';
+const EXPORT = '导出：生成 MPS / Local / Global 三表文件';
+const CLEAR = '清空：丢弃未完成的 Global 导入';
+const IMPORT = '导入 Global 文件夹：读取本周 MPS 导出的全部源文件（生成草稿）';
+const LOCAL = '导入本地 MPS 文件（Month End）：检查格式并写入 Local 数据集';
 
 beforeEach(() => {
-  // restoreMocks runs before every test, so each mock's implementation has to be
-  // put back — including hasBackend, which decides whether anything renders.
   mockedHasBackend.mockReturnValue(true);
   mocked.getStatus.mockResolvedValue(STATUS);
-  mocked.getConfig.mockResolvedValue({ config: CONFIG, path: '/tmp/config/clear.yaml' });
-  mocked.getStagingFiles.mockResolvedValue(STAGED);
+  mocked.getConfig.mockResolvedValue({ config: CONFIG, path: '/tmp/clear.yaml' });
+  mocked.getFiles.mockResolvedValue(FILES);
   mocked.getGridHeader.mockResolvedValue(HEADER);
-  mocked.queryData.mockResolvedValue(EMPTY_RESULT);
+  mocked.queryData.mockResolvedValue(EMPTY);
   mocked.getArchive.mockResolvedValue([]);
-  mocked.getYears.mockResolvedValue([2026]);
-  mocked.getWeeks.mockResolvedValue([39]);
+  mocked.getYears.mockResolvedValue([]);
+  mocked.getWeeks.mockResolvedValue([]);
   mocked.getLogs.mockResolvedValue([]);
+  mocked.importFolder.mockResolvedValue(IMPORT_RESULT);
+  mocked.finishGlobalMPS.mockResolvedValue(FINISH_RESULT);
+  mocked.commit.mockResolvedValue(COMMIT_RESULT);
+  mocked.exportBundle.mockResolvedValue(EXPORT_RESULT);
+  mocked.discardDraft.mockResolvedValue({ ...IMPORT_RESULT, action: 'discard', fileCount: 13, rowCount: 1516 });
+  mocked.discardWeekImports.mockResolvedValue({ weekCode: '2639', datasets: 2 });
 });
 
-/** Waits until the first status refresh has landed in the status bar. */
-async function renderApp(waitFor = '2639 · Global 1,516 / Local 1,736') {
+async function renderApp(waitForText = '2639 · Global v2 1,516 / Local v1 1,736') {
   const view = render(<App />);
-  await screen.findByText(waitFor);
+  await screen.findByText(waitForText);
   return view;
 }
 
 describe('App', () => {
   it('tells the user to run the desktop application when there is no backend', () => {
     mockedHasBackend.mockReturnValue(false);
-
     render(<App />);
-
     expect(screen.getByText('未检测到 CLEAR 后端')).toBeTruthy();
   });
 
-  it('shows the backend status in the status bar', async () => {
+  it('shows the workspace counts in the status bar', async () => {
     await renderApp();
-
-    expect(screen.getByText('1 周 · 1,516 行')).toBeTruthy();
-    expect(screen.getByText('WH_CNB')).toBeTruthy();
-    expect(screen.getByText('纯数据')).toBeTruthy();
-    expect(screen.getByText('本地数据库')).toBeTruthy();
+    expect(screen.getByText('2639 · Global v2 1,516 / Local v1 1,736')).toBeTruthy();
+    expect(screen.getByText(/Local 文件：local\.xlsx/)).toBeTruthy();
+    expect(screen.getByText('13 个文件 · 已导入')).toBeTruthy();
+    expect(screen.getByText('Local 数据 v1')).toBeTruthy();
   });
 
-  it('opens the import summary after a successful import', async () => {
-    mocked.importFolder.mockResolvedValue(IMPORT_RESULT);
-
-    await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: IMPORT_BUTTON }));
-
-    // The summary is the modal, not a notice: 合并行数 is one of its statistics.
-    expect(await screen.findByText('导入行数')).toBeTruthy();
-  });
-
-  it('reports a failed import and does not open the summary', async () => {
-    mocked.importFolder.mockRejectedValue(new Error('磁盘已满'));
-
-    await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: IMPORT_BUTTON }));
-
-    expect(await screen.findByText('磁盘已满')).toBeTruthy();
-    expect(screen.queryByText('导入行数')).toBeNull();
-  });
-
-  it('only offers 整合 when both inputs are in the workbench', async () => {
-    mocked.getStatus.mockResolvedValue({
-      ...STATUS,
-      hasStaging: true,
-      hasGlobal: true,
-      hasLocal: false,
-      localRows: 0,
-      lastDataset: 'global',
-    });
-    const { unmount } = render(<App />);
-    const missingLocal = await screen.findByRole('button', { name: COMMIT_BUTTON });
-    await waitFor(() => expect(missingLocal.hasAttribute('disabled')).toBe(true));
-    unmount();
-
-    mocked.getStatus.mockResolvedValue({ ...STATUS, hasStaging: false, hasGlobal: false, hasLocal: false, stagedRows: 0 });
-    const empty = render(<App />);
-    const noWorkbench = await screen.findByRole('button', { name: COMMIT_BUTTON });
-    await waitFor(() => expect(noWorkbench.hasAttribute('disabled')).toBe(true));
-    empty.unmount();
-
-    mocked.getStatus.mockResolvedValue(STATUS);
+  it('starts with an empty workbench but keeps the history panel', async () => {
+    mocked.getStatus.mockResolvedValue(BLANK);
     render(<App />);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: COMMIT_BUTTON }).hasAttribute('disabled')).toBe(false),
-    );
+    await screen.findByText('当前周');
+    expect(await screen.findByText('暂无数据，请使用工具栏的导入或添加')).toBeTruthy();
+    expect(mocked.getGridHeader).not.toHaveBeenCalled();
+    expect(screen.queryByText('已导入文件')).toBeNull();
+    expect(screen.queryByText('本周数据')).toBeNull();
   });
 
-  it('shows the committed week in the grid after 整合', async () => {
-    // The grid renders the week from the header the backend returns for it.
-    mocked.getGridHeader.mockImplementation(async (source: string) =>
-      source === '2639' ? { ...HEADER, source, weekCode: '2639', weekStart: '2026-09-21' } : HEADER,
-    );
-    mocked.commit.mockResolvedValue({
-      weekCode: '2639',
-      weekStart: '2026-09-21',
-      tableName: 'data_2639',
-      rowCount: 2580,
-      fileCount: 14,
-      committedAt: '2026-10-05 21:16:46',
-      overwrote: false,
-      mergedRows: 2580,
-      globalRows: 1516,
-      localRows: 1736,
-    });
-
-    await renderApp();
-    // While the staging area is the source, an empty grid says so.
-    expect(await screen.findByText('这份数据还没有导入')).toBeTruthy();
-
-    // The staged data is gone once it is integrated, which is what the strip and
-    // the status bar read.
-    mocked.getStatus.mockResolvedValue({ ...STATUS, hasStaging: false, stagedRows: 0 });
-    fireEvent.click(screen.getByRole('button', { name: COMMIT_BUTTON }));
-
-    // The report is a dialog with the numbers, not a line in the status bar.
-    expect(await screen.findByText('周码 2639 已整合入库')).toBeTruthy();
-    expect(screen.getByText('整合数据')).toBeTruthy();
-    expect(screen.getByText('2,580 行')).toBeTruthy();
-    expect(screen.getByText('1,516 行')).toBeTruthy();
-    expect(screen.getByText('1,736 行')).toBeTruthy();
-    expect(screen.getByText('本周此前没有数据')).toBeTruthy();
-    // …and the week stays on screen, now labelled as integrated. The label 已整合
-    // also appears in the status bar, so the strip is identified by its detail.
-    expect(screen.getByText('周码 2639（2026-09-21）· 2,580 行 · 14 个文件')).toBeTruthy();
-    // The list itself is named after that state, with the week it holds.
-    expect(screen.getByText('数据清单 - 已整合（周码 2639）')).toBeTruthy();
-    // The grid follows the committed week: it renders that week's header and is
-    // no longer the staging area. 该周暂无数据 is deliberately not asserted on —
-    // the archive panel renders the same sentence.
-    expect(await screen.findByText('2639 · 2026-09-21')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByText('这份数据还没有导入')).toBeNull());
-  });
-
-  it('offers 导入本地 MPS and reports the workbench waiting for it', async () => {
+  it('does not call the Global file list expired when only the integration is', async () => {
     mocked.getStatus.mockResolvedValue({
-      ...STATUS,
-      hasGlobal: true,
-      hasLocal: false,
-      globalRows: 1516,
-      localRows: 0,
-      lastDataset: 'global',
-      stagedRows: 1516,
+      ...STATUS, hasIntegration: true, integrationId: 100, integrationWeek: '2639',
+      integrationRows: 2580, integrationExpired: true, unintegrated: true,
     });
+    await renderApp();
+    expect(screen.getByText('13 个文件 · 已导入')).toBeTruthy();
+    expect(screen.queryByText(/13 个文件 · 已过期/)).toBeNull();
+  });
+
+  it('opens the import summary and selects the new draft', async () => {
+    mocked.getStatus.mockResolvedValueOnce(DRAFT).mockResolvedValue(DRAFT);
+    await renderApp('2639 · Global 导入中 1,516');
+    fireEvent.click(screen.getByRole('button', { name: IMPORT }));
+    expect(await screen.findByText('已加入 Global 导入草稿')).toBeTruthy();
+    expect(mocked.importFolder).toHaveBeenCalled();
+  });
+
+  it('reports a failed import instead of opening the summary', async () => {
+    mocked.importFolder.mockRejectedValue(new Error('文件夹内没有找到 .xlsm 或 .xlsx 文件'));
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: IMPORT }));
+    expect(await screen.findByText('文件夹内没有找到 .xlsm 或 .xlsx 文件')).toBeTruthy();
+    expect(screen.queryByText('已加入 Global 导入草稿')).toBeNull();
+  });
+
+  it('completes a draft and reports the new version', async () => {
+    mocked.getStatus.mockResolvedValue(DRAFT);
+    await renderApp('2639 · Global 导入中 1,516');
+    fireEvent.click(screen.getByRole('button', { name: FINISH }));
+    await waitFor(() => expect(mocked.finishGlobalMPS).toHaveBeenCalledWith(false));
+    expect(await screen.findByText('周码 2639 的 Global 导入已完成')).toBeTruthy();
+    expect(screen.getByText('Global v2')).toBeTruthy();
+  });
+
+  it('does not add a second notice bar after a Local import', async () => {
     mocked.importLocalMPS.mockResolvedValue({
-      ...IMPORT_RESULT,
-      action: 'local',
-      ok: 1,
-      total: 1,
-      rowsKept: 1736,
-      localRows: 1736,
+      ...IMPORT_RESULT, action: 'local', draft: false, version: 4, expired: true,
+      localRows: 1736, rowsKept: 1736, fileCount: 1, rowCount: 1736,
     });
-
-    await renderApp('2639 · Global 1,516');
-    expect(screen.getByText('数据清单 - Global（待整合）')).toBeTruthy();
-    expect(screen.getByText('待补齐')).toBeTruthy();
-    expect(screen.getByText(/还需要导入本地 MPS 文件/)).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: IMPORT_LOCAL_BUTTON }));
-    await waitFor(() => expect(mocked.importLocalMPS).toHaveBeenCalled());
-    expect(await screen.findByText('本地 MPS 导入完成')).toBeTruthy();
-    expect(screen.getByText('导入行数')).toBeTruthy();
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: LOCAL }));
+    expect(await screen.findByText('Local 导入完成')).toBeTruthy();
+    expect(screen.queryByText(/Local 已导入（v4）/)).toBeNull();
   });
 
-  it('accepts a local-first workbench and asks for Global before 整合', async () => {
-    mocked.getStatus.mockResolvedValue({
-      ...STATUS,
-      hasGlobal: false,
-      hasLocal: true,
-      globalRows: 0,
-      localRows: 1736,
-      lastDataset: 'local',
-      stagedRows: 1736,
+  it('asks for confirmation when files failed before completing the draft', async () => {
+    mocked.getStatus.mockResolvedValue({ ...DRAFT, draftFailed: 2 });
+    await renderApp('2639 · Global 导入中 1,516');
+    fireEvent.click(screen.getByRole('button', { name: FINISH }));
+    await waitFor(() => expect(screen.getAllByText('仍有文件读取失败').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole('button', { name: '仍然完成' }).at(-1)!);
+    await waitFor(() => expect(mocked.finishGlobalMPS).toHaveBeenCalledWith(true));
+  });
+
+  it('integrates completed inputs and reports the three counts', async () => {
+    await renderApp();
+    const commit = screen.getByRole('button', { name: COMMIT });
+    expect(commit.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(commit);
+    await waitFor(() => expect(mocked.commit).toHaveBeenCalled());
+    expect(await screen.findByText('周码 2639 已整合入库')).toBeTruthy();
+    expect(screen.getAllByText('2,580 行').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('v2 · 1,516 行').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('v1 · 1,736 行').length).toBeGreaterThan(0);
+  });
+
+  it('disables 整合 while a draft is open', async () => {
+    mocked.getStatus.mockResolvedValue(DRAFT);
+    await renderApp('2639 · Global 导入中 1,516');
+    expect(screen.getByRole('button', { name: COMMIT }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('exports the three-table file only after integration', async () => {
+    mocked.getStatus.mockResolvedValue(INTEGRATED);
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: EXPORT }));
+    await waitFor(() => expect(mocked.exportBundle).toHaveBeenCalledWith('2639'));
+    expect(await screen.findByText('三表文件已导出')).toBeTruthy();
+    expect(screen.getByText('/tmp/BW.xlsx')).toBeTruthy();
+  });
+
+  it('shows the dataset totals and the migration note in the file list', async () => {
+    mocked.getFiles.mockResolvedValue({
+      files: [], hasDraft: false, fileCount: 13, rowCount: 1516, failedCount: 0,
+      note: '该周的数据由旧版本迁移而来，未保留逐文件清单；文件数、行数来自数据集记录。',
     });
-
-    await renderApp('2639 · Local 1,736');
-    expect(screen.getByText('数据清单 - Local（待整合）')).toBeTruthy();
-    expect(screen.getByText('待补齐')).toBeTruthy();
-    expect(screen.getByText(/还需要导入 Global 数据/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: COMMIT_BUTTON }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: IMPORT_LOCAL_BUTTON }).hasAttribute('disabled')).toBe(false);
-  });
-
-  it('exports the three-table file once the week is integrated', async () => {
-    mocked.getStatus.mockResolvedValue({
-      ...STATUS,
-      hasStaging: false,
-      weekCode: '',
-      weekStart: '',
-      stagedRows: 0,
-      hasGlobal: true,
-      hasLocal: true,
-    });
-    mocked.exportBundle.mockResolvedValue({
-      destPath: '/tmp/BW_CN_MPS Week39 2026.xlsx',
-      mode: 'bundle',
-      rows: 2580,
-      cols: 40,
-      comments: 0,
-      cfRows: 0,
-      stylesUsed: 0,
-      dropped: 0,
-      sizeBytes: 9000,
-      preservedVba: false,
-      durationMs: 30,
-      sheets: 3,
-    });
-
-    await renderApp('1 周 · 1,516 行');
-    fireEvent.click(screen.getByRole('button', { name: EXPORT_BUTTON }));
-
-    await waitFor(() => expect(mocked.exportBundle).toHaveBeenCalled());
-    expect(mocked.export).not.toHaveBeenCalled();
-    expect(await screen.findByText(/三表文件（MPS \/ Local \/ Global/)).toBeTruthy();
-  });
-
-  it('clears the previous notice when the next action begins', async () => {
-    mocked.commit.mockRejectedValue(new Error('整合示例失败'));
-
     await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: COMMIT_BUTTON }));
-    expect(await screen.findByText('整合示例失败')).toBeTruthy();
-
-    mocked.importFolder.mockResolvedValue(IMPORT_RESULT);
-    fireEvent.click(screen.getByRole('button', { name: IMPORT_BUTTON }));
-    // The stale failure must not sit above the grid while the new import runs.
-    await waitFor(() => expect(screen.queryByText('整合示例失败')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: '查看 Global 已导入文件' }));
+    expect(await screen.findByText('13 个文件 · 1,516 行')).toBeTruthy();
+    expect(screen.getByText(/旧版本迁移/)).toBeTruthy();
   });
 
-  it('clears the previous notice when a window is opened', async () => {
-    mocked.commit.mockRejectedValue(new Error('整合示例失败'));
-
-    await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: COMMIT_BUTTON }));
-    expect(await screen.findByText('整合示例失败')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: '查看已导入文件' }));
-    await waitFor(() => expect(screen.queryByText('整合示例失败')).toBeNull());
-  });
-
-  it('resizes the lower half from the keyboard and restores it on double click', async () => {
-    await renderApp();
-
-    const handle = screen.getByRole('separator', { name: '调整上下区域高度' });
-    // The lower half starts at 300px, measured from the stubbed layout.
-    await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('300'));
-
-    fireEvent.keyDown(handle, { key: 'ArrowUp' });
-    await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('316'));
-
-    fireEvent.doubleClick(handle);
-    await waitFor(() => expect(handle.getAttribute('aria-valuenow')).toBe('300'));
-  });
-
-  it('asks before quitting, then asks the backend to quit', async () => {
-    mocked.quit.mockResolvedValue(undefined);
-
-    await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: QUIT_BUTTON }));
-
-    // antd renders a two-character Chinese label with a space inside it
-    // ("退 出"), so the name is matched loosely but anchored — that keeps the
-    // toolbar's 退出程序 out of the match.
-    fireEvent.click(await screen.findByRole('button', { name: /^退\s*出$/ }));
-    await waitFor(() => expect(mocked.quit).toHaveBeenCalled());
-  });
-  it('names the list after what has happened to the data', async () => {
-    // A fresh database: nothing staged, nothing integrated. The status the
-    // refresh after the import returns is the ordinary one.
-    mocked.getStatus.mockResolvedValueOnce({
-      ...STATUS,
-      hasStaging: false,
-      stagedRows: 0,
-      hasGlobal: false,
-      hasLocal: false,
-      globalRows: 0,
-      localRows: 0,
-      lastDataset: '',
-    });
-    mocked.getStatus.mockResolvedValue({
-      ...STATUS,
-      hasGlobal: true,
-      hasLocal: false,
-      localRows: 0,
-      globalRows: 1516,
-      lastDataset: 'global',
-      stagedRows: 1516,
-    });
-    mocked.getStagingFiles.mockResolvedValue({ ...STAGED, hasStaging: false, fileCount: 0, rowCount: 0 });
-    mocked.importFolder.mockResolvedValue(IMPORT_RESULT);
-
-    render(<App />);
-    // Nothing has been imported yet, so the list is just its own name.
-    expect(await screen.findByText('数据清单')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: IMPORT_BUTTON }));
-
-    expect(await screen.findByText('数据清单 - Global（待整合）')).toBeTruthy();
-  });
-
-  it('says which inputs are in the workbench and what is missing', async () => {
-    await renderApp();
-
-    // The strip above the table answers "which sides are ready".
-    expect(screen.getByText('待整合')).toBeTruthy();
-    expect(screen.getByText('周码 2639 · Global 1,516 行 · Local 1,736 行')).toBeTruthy();
-    expect(screen.getByText(/两份数据已就绪/)).toBeTruthy();
-  });
-
-  it('switches the grid between the two imported sides', async () => {
-    await renderApp();
-
-    fireEvent.click(screen.getByRole('button', { name: '查看 Local 数据' }));
+  it('discards the draft after confirmation', async () => {
+    mocked.getStatus.mockResolvedValue(DRAFT);
+    await renderApp('2639 · Global 导入中 1,516');
+    fireEvent.click(screen.getByRole('button', { name: CLEAR }));
     await waitFor(() =>
-      expect(mocked.queryData).toHaveBeenLastCalledWith(expect.objectContaining({ dataset: 'local' })),
+      expect(screen.getAllByText('丢弃未完成的 Global 导入？').length).toBeGreaterThan(0),
     );
+    fireEvent.click(screen.getAllByRole('button', { name: /丢\s*弃/ }).at(-1)!);
+    await waitFor(() => expect(mocked.discardDraft).toHaveBeenCalled());
+  });
 
+  it('offers 丢弃本周导入 for un-integrated completed imports', async () => {
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: '丢弃本周导入' }));
+    await waitFor(() =>
+      expect(screen.getAllByText('丢弃周码 2639 未整合的导入？').length).toBeGreaterThan(0),
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: /丢\s*弃/ }).at(-1)!);
+    await waitFor(() => expect(mocked.discardWeekImports).toHaveBeenCalledWith('2639'));
+  });
+
+  it('switches the grid between the completed sides', async () => {
+    await renderApp();
+    await waitFor(() => expect(mocked.getGridHeader).toHaveBeenCalled());
+    mocked.getGridHeader.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '查看 Global 数据' }));
-    await waitFor(() =>
-      expect(mocked.queryData).toHaveBeenLastCalledWith(expect.objectContaining({ dataset: 'global' })),
-    );
+    await waitFor(() => expect(mocked.getGridHeader).toHaveBeenCalledWith(11));
+    mocked.getGridHeader.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '查看 Local 数据' }));
+    await waitFor(() => expect(mocked.getGridHeader).toHaveBeenCalledWith(12));
   });
 
-  it('replaces a same-named file without asking, and names what it replaced', async () => {
-    mocked.addFiles.mockResolvedValue({
-      ...IMPORT_RESULT,
-      action: 'add',
-      replaced: ['source.xlsm', 'extra.xlsm'],
-    });
-
+  it('asks before quitting', async () => {
     await renderApp();
-    fireEvent.click(screen.getByRole('button', { name: ADD_BUTTON }));
-
-    // Straight to the summary: no overwrite prompt in between any more.
-    expect(await screen.findByText('导入行数')).toBeTruthy();
-    expect(screen.queryByText('该文件已经在整合清单里')).toBeNull();
-    expect(screen.getByText(/已覆盖 2 个同名文件（source\.xlsm、extra\.xlsm）/)).toBeTruthy();
-  });
-
-  it('reports what 清空 discarded and leaves the area saying 已清空', async () => {
-    mocked.clearStaging.mockResolvedValue({ weekCode: '2639', files: 13, rows: 1516 });
-
-    await renderApp();
-    // 清空 leaves no staging behind, which the refresh after it reads.
-    mocked.getStatus.mockResolvedValue({ ...STATUS, hasStaging: false, stagedRows: 0 });
-    fireEvent.click(screen.getByRole('button', { name: /^清空/ }));
-    // 清空 is irreversible, so it still asks first.
-    // The exact label with antd's inserted space: /清\s*空/ would also match the
-    // toolbar's "清空：删除…" button and press that one again.
-    fireEvent.click(await screen.findByRole('button', { name: '清 空' }));
-
-    expect(await screen.findByText('已清空未整合的数据')).toBeTruthy();
-    expect(screen.getByText('文件数')).toBeTruthy();
-    expect(screen.getByText('13')).toBeTruthy();
-    expect(screen.getByText('1,516')).toBeTruthy();
-    expect(screen.getByText('已清空')).toBeTruthy();
-    expect(screen.getByText('周码 2639 · 13 个文件 · 1,516 行')).toBeTruthy();
-    expect(screen.getByText('数据清单 - 已清空')).toBeTruthy();
-    expect(screen.getByText('已整合数据')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '退出程序' }));
+    await waitFor(() => expect(screen.getAllByText('退出 CLEAR？').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole('button', { name: /退\s*出/ }).at(-1)!);
+    await waitFor(() => expect(mocked.quit).toHaveBeenCalled());
   });
 });

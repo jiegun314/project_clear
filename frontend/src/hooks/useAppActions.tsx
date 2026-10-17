@@ -3,115 +3,116 @@ import { Modal } from 'antd';
 import { api } from '../services/api';
 import { errorText } from '../lib/errors';
 import type { SummaryItem } from '../components/SummaryDialog';
-import type { CommitResult, ExportResult, ImportResult } from '../types';
+import type { CommitResult, ExportResult, FinishResult, ImportResult, Status } from '../types';
 import type { BackendState } from './useBackendState';
 import type { TaskRunner } from './useTaskRunner';
 
+/** Which dataset the grid is showing. */
+export type SelectedKind = 'draft' | 'global' | 'local' | 'merged';
+
 /**
- * What the data area is holding right now — the three states the requirement
- * names, plus the neutral one before anything has happened.
+ * What the data area is holding. The workspace is driven by the backend status:
+ * the draft, the completed Global/Local datasets, and the week's integration
+ * (which may be expired by a newer import).
  */
 export type DataState =
   | { kind: 'none' }
-  /**
-   * The workbench holds the two imported sides. Until 整合 there is no merged
-   * result: the grid shows one side (dataset), and the strip reports both.
-   */
   | {
-      kind: 'staging';
-      weekCode: string;
-      hasGlobal: boolean;
-      hasLocal: boolean;
-      globalRows: number;
-      localRows: number;
-      /** The side the grid is showing: global or local. */
-      dataset: string;
+      kind: 'workspace';
+      status: Status;
+      selected: number;
+      selectedKind: SelectedKind;
       replaced: string[];
     }
-  | { kind: 'committed'; weekCode: string; weekStart: string; files: number; rows: number; overwrote: boolean }
-  | { kind: 'cleared'; weekCode: string; files: number; rows: number };
+  | { kind: 'cleared'; week: string; files: number; rows: number };
 
-/** What the last 整合 or 清空 left behind, once there is no staging left. */
+/** What the last draft/discard left behind, when the workspace is empty. */
 type LastEvent =
   | { kind: 'none' }
-  | { kind: 'staging'; replaced: string[] }
-  | { kind: 'committed'; weekCode: string; weekStart: string; files: number; rows: number; overwrote: boolean }
-  | { kind: 'cleared'; weekCode: string; files: number; rows: number };
+  | { kind: 'workspace'; replaced: string[] }
+  | { kind: 'cleared'; week: string; files: number; rows: number };
 
-/** Everything the toolbar, the panels and the shortcuts can ask the shell to do. */
 export interface AppActions {
-  // The dialogs an action reports through, and the state each one needs.
   importResult: ImportResult | null;
   importOpen: boolean;
   closeImportSummary: () => void;
-  stagedOpen: boolean;
-  openStagedFiles: () => void;
-  closeStagedFiles: () => void;
+  filesOpen: boolean;
+  openFiles: () => void;
+  closeFiles: () => void;
   settingsOpen: boolean;
   openSettings: () => void;
   closeSettings: () => void;
   aboutOpen: boolean;
   openAbout: () => void;
   closeAbout: () => void;
-  historyWeek: string | null;
-  /** Which of the week's three datasets the archive window is showing. */
+  historyDatasetId: number | null;
   historyDataset: string;
   historyLoading: boolean;
-  openHistory: (week: string, dataset: string) => void;
+  openHistory: (datasetId: number, dataset: string) => void;
   closeHistory: () => void;
-  /** The archive window has something on screen; the cover can come down. */
   historyReady: () => void;
-  /** The main grid follows the working set: staging after an import, the committed week after 整合. */
-  gridSource: string;
-  /** Which dataset the main grid reads: the selected side while staging, merged after 整合. */
-  gridDataset: string;
-  /** Switches which imported side the grid shows (global or local). */
-  selectStagingDataset: (dataset: 'global' | 'local') => void;
-  /** 待整合 / 已整合 / 已清空, shown above the table and in its empty state. */
+  /** Which dataset the main grid reads (0 when there is nothing). */
+  gridDatasetId: number;
+  /** Switches the grid to a dataset (draft/Global/Local/merged). */
+  selectDataset: (datasetId: number) => void;
   dataState: DataState;
-  /** The dialog 整合入库 and 清空 report through. */
   summary: { open: boolean; title: string; tone: 'success' | 'neutral'; items: SummaryItem[] };
   closeSummary: () => void;
-  // The actions themselves.
   runImport: (kind: 'import' | 'add') => Promise<void>;
-  /** 导入本地 MPS：格式检查通过后写入本地数据并重新计算合并结果。 */
+  runFinishGlobal: () => Promise<void>;
   runImportLocal: () => Promise<void>;
   runCommit: () => Promise<void>;
-  runExport: (weekCode?: string, mode?: string, dataset?: string) => Promise<ExportResult | null>;
+  runExport: (datasetId?: number, mode?: string) => Promise<ExportResult | null>;
   runToolbarExport: () => Promise<void>;
-  runClear: () => void;
+  /** 清空: discard the open Global draft only. */
+  runDiscardDraft: () => void;
+  /** 丢弃本周导入: drop the week's un-integrated datasets; history untouched. */
+  runDiscardWeek: () => void;
   runQuit: () => void;
 }
 
+function selectable(s: Status, id: number): boolean {
+  return id > 0 && (id === s.draftId || id === s.globalId || id === s.localId || id === s.integrationId);
+}
+
+function kindOf(s: Status, id: number): SelectedKind {
+  if (id !== 0 && id === s.draftId) return 'draft';
+  if (id !== 0 && id === s.globalId) return 'global';
+  if (id !== 0 && id === s.localId) return 'local';
+  return 'merged';
+}
+
 /**
- * What the shell does when the user clicks something: the five toolbar commands,
- * the confirmations they ask for, and the dialogs they report through.
- *
- * Kept apart from App so that the shell itself stays a description of the layout
- * — which is also where the rules that matter live: 清空 always asks first and
- * spells out what it will not touch, and every export goes through runExport so
- * the status bar has one source of progress.
+ * The default view follows the workflow: a current integration is what the
+ * business hands on; otherwise the most recent completed import is shown. After
+ * a new import makes the integration expired, the new import wins, so the user
+ * sees what just arrived.
+ */
+function defaultSelection(s: Status): number {
+  if (s.hasIntegration && !s.integrationExpired) return s.integrationId;
+  if (s.hasDraft) return s.draftId;
+  const g = s.hasGlobal ? Date.parse(s.globalAt) : -1;
+  const l = s.hasLocal ? Date.parse(s.localAt) : -1;
+  if (g >= 0 || l >= 0) return l > g ? s.localId : s.globalId;
+  if (s.hasIntegration) return s.integrationId;
+  return 0;
+}
+
+/**
+ * The shell's actions: imports, the Global finish signal, Local import,
+ * integration, exports, and the two discard paths.
  */
 export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActions {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [stagedOpen, setStagedOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [historyWeek, setHistoryWeek] = useState<string | null>(null);
+  const [historyDatasetId, setHistoryDatasetId] = useState<number | null>(null);
   const [historyDataset, setHistoryDataset] = useState('merged');
-  // 历史数据量大，点开要等一会儿：点击那一刻就把全屏遮罩盖上，
-  // 数据到位（或确认没有数据）后由 HistoryView 通知收起。
   const [historyLoading, setHistoryLoading] = useState(false);
-  // The main grid follows the working set: the staging area right after an
-  // import, and the committed week once the data has been integrated. Without
-  // this the grid would empty out at the moment the user integrates.
-  const [gridSource, setGridSource] = useState('');
-  // Which of the two imported sides the grid shows while the workbench is open.
-  // Empty means "follow the backend": the side imported last.
-  const [stagingDataset, setStagingDataset] = useState('');
-  // The live staging (below) wins over this; it only answers "what did the last
-  // 整合 or 清空 leave behind" once there is no staging left to ask about.
+  // The dataset the grid should show. 0 means "follow the backend default".
+  const [selectedDataset, setSelectedDataset] = useState(0);
   const [lastEvent, setLastEvent] = useState<LastEvent>({ kind: 'none' });
   const [summary, setSummary] = useState<AppActions['summary']>({
     open: false,
@@ -122,33 +123,26 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
   const showSummary = (title: string, items: SummaryItem[], tone: 'success' | 'neutral' = 'success') =>
     setSummary({ open: true, title, tone, items });
 
-  /** Opens a window and drops the previous action's notice above the grid. */
   const openDialog = (setter: (open: boolean) => void) => {
     tasks.setNotice(null);
     setter(true);
   };
 
-
-  /** 任务收尾：成功时留下绿色"完成"，失败或取消则清掉进度显示。 */
   const finishImport = async (res: ImportResult) => {
     setImportResult(res);
     setImportOpen(true);
-    setGridSource('');
-    // The grid opens on the side that was just imported.
-    setStagingDataset(res.action === 'local' ? 'local' : 'global');
-    setLastEvent({ kind: 'staging', replaced: res.replaced ?? [] });
+    setSelectable(res.datasetId);
+    setLastEvent({ kind: 'workspace', replaced: res.replaced ?? [] });
     await backend.afterChange();
   };
 
+  const setSelectable = (id: number) => setSelectedDataset(id);
+
   const runImport = async (kind: 'import' | 'add') => {
-    tasks.begin('准备中', 0, 0);
+    tasks.begin(kind === 'import' ? '导入 Global' : '添加 Global', 0, 0);
     let ok = false;
     try {
-      // A file whose name is already in the list is replaced by this call — the
-      // service does that without asking — so there is no confirmation branch
-      // here. Which files were replaced comes back in the result and is reported
-      // by the strip above the table and in the import summary.
-      const res = kind === 'import' ? await api.importFolder() : await api.addFiles();
+      const res = await (kind === 'import' ? api.importFolder() : api.addFiles());
       if (!res) return;
       await finishImport(res);
       ok = true;
@@ -159,11 +153,59 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     }
   };
 
-  /**
-   * 导入本地 MPS: the backend checks the workbook's layout, writes the local rows
-   * and recomputes the merged result. A format problem comes back as an error
-   * naming the sheet, row and column, and nothing is written.
-   */
+  const showFinishSummary = (r: FinishResult) => {
+    showSummary(
+      `周码 ${r.weekCode} 的 Global 导入已完成`,
+      [
+        { label: '版本', value: `Global v${r.version}`, strong: true },
+        { label: '文件', value: `${r.fileCount} 个` },
+        { label: '行数', value: r.rowCount.toLocaleString() },
+        { label: '读取失败', value: r.failedCount > 0 ? `${r.failedCount} 个文件` : '无' },
+        {
+          label: '整合状态',
+          value: r.expired
+            ? `已有整合（${r.integrationAt}）已过期，请重新整合`
+            : '已完成；两份数据齐备后即可整合',
+        },
+      ],
+      r.expired ? 'neutral' : 'success',
+    );
+  };
+
+  const finishNow = async (confirmFailures: boolean) => {
+    tasks.begin('完成 Global 导入', 0, 2);
+    let ok = false;
+    try {
+      const r = await api.finishGlobalMPS(confirmFailures);
+      ok = true;
+      setSelectedDataset(r.datasetId);
+      setLastEvent({ kind: 'workspace', replaced: [] });
+      await backend.afterChange();
+      showFinishSummary(r);
+    } catch (e) {
+      tasks.setNotice({ type: 'error', text: errorText(e) });
+    } finally {
+      tasks.finish(ok);
+    }
+  };
+
+  const runFinishGlobal = async () => {
+    const st = backend.status;
+    if (!st?.hasDraft) return;
+    tasks.setNotice(null);
+    if (st.draftFailed > 0) {
+      Modal.confirm({
+        title: '仍有文件读取失败',
+        content: `${st.draftFailed} 个文件没有读入。仍要完成这次 Global 导入吗？失败的文件会在「已导入文件」里保留原因。`,
+        okText: '仍然完成',
+        cancelText: '返回检查',
+        onOk: () => finishNow(true),
+      });
+      return;
+    }
+    await finishNow(false);
+  };
+
   const runImportLocal = async () => {
     tasks.begin('导入本地 MPS', 0, 0);
     let ok = false;
@@ -171,6 +213,8 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
       const res = await api.importLocalMPS();
       if (!res) return;
       await finishImport(res);
+      // No extra notice bar: the import result dialog and the one status strip
+      // already say the integration is now expired.
       ok = true;
     } catch (e) {
       tasks.setNotice({ type: 'error', text: errorText(e) });
@@ -180,32 +224,25 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
   };
 
   const runCommit = async () => {
-    tasks.begin('整合入库', 0, 1);
+    tasks.begin('整合', 0, 2);
     let ok = false;
     try {
       const r: CommitResult = await api.commit();
-      // The week stays on screen after 整合 — it is the same data, now in the
-      // archive — and the strip above the table says so.
-      setGridSource(r.weekCode);
-      setLastEvent({
-        kind: 'committed',
-        weekCode: r.weekCode,
-        weekStart: r.weekStart,
-        files: r.fileCount,
-        rows: r.rowCount,
-        overwrote: r.overwrote,
-      });
+      ok = true;
+      setSelectedDataset(r.mergedId);
       showSummary(`周码 ${r.weekCode} 已整合入库`, [
         { label: '周码', value: `${r.weekCode}（${r.weekStart}）`, strong: true },
         { label: '整合数据', value: `${r.mergedRows.toLocaleString()} 行`, strong: true },
-        { label: 'Global', value: `${r.globalRows.toLocaleString()} 行` },
-        { label: 'Local', value: `${r.localRows.toLocaleString()} 行` },
+        { label: 'Global', value: `v${r.globalVersion} · ${r.globalRows.toLocaleString()} 行` },
+        { label: 'Local', value: `v${r.localVersion} · ${r.localRows.toLocaleString()} 行` },
         { label: '文件数', value: String(r.fileCount) },
-        { label: '原有数据', value: r.overwrote ? '已覆盖同一周的三份数据' : '本周此前没有数据' },
+        {
+          label: '原有数据',
+          value: r.wasExpired ? '已把过期的整合更新为最新版本' : r.overwrote ? '已覆盖原有整合' : '本周此前没有整合',
+        },
         { label: '整合时间', value: r.committedAt },
       ]);
       await backend.afterChange();
-      ok = true;
     } catch (e) {
       tasks.setNotice({ type: 'error', text: errorText(e) });
     } finally {
@@ -213,21 +250,41 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     }
   };
 
-  /**
-   * 导出：工具栏用当前临时/周数据的周码，历史数据窗口用它在看的那一周。
-   * 两条路径都必须经过这里，状态栏的进度与完成标记才有一致的来源。
-   */
-  const runExport = async (weekCode?: string, mode = '', dataset = ''): Promise<ExportResult | null> => {
+  const showExport = (r: ExportResult) => {
+    const size =
+      r.sizeBytes >= 1024 * 1024
+        ? `${(r.sizeBytes / 1024 / 1024).toFixed(2)} MB`
+        : `${Math.max(1, Math.round(r.sizeBytes / 1024))} KB`;
+    const items: SummaryItem[] = [
+      { label: '文件', value: r.destPath, strong: true },
+      {
+        label: '内容',
+        value:
+          r.sheets === 3
+            ? 'MPS / Local / Global（3 个工作表）'
+            : `${r.weekCode} · ${r.mode === 'clean' ? '纯数据' : '原文件格式'}`,
+      },
+      r.sheets === 3
+        ? { label: '行数', value: `三表合计 ${r.rows.toLocaleString()} 行` }
+        : { label: '行数', value: `${r.rows.toLocaleString()} 行 × ${r.cols} 列` },
+      { label: '大小', value: size },
+    ];
+    if (r.expired) {
+      items.push({ label: '提示', value: '该整合已过期，导出的是上次整合结果' });
+    }
+    showSummary(r.sheets === 3 ? '三表文件已导出' : '数据已导出', items, r.expired ? 'neutral' : 'success');
+  };
+
+  const runExport = async (datasetId?: number, mode = ''): Promise<ExportResult | null> => {
+    if (!datasetId) return null;
     tasks.begin('导出', 0, 2);
     let ok = false;
     try {
-      // Empty mode: the toolbar follows whatever 参数设定 says (纯数据 by default).
-      const r: ExportResult | null = await api.export(
-        weekCode ?? backend.status?.weekCode ?? '',
-        dataset,
-        mode,
-      );
+      const r: ExportResult | null = await api.exportDataset(datasetId, mode);
       ok = Boolean(r);
+      if (r) {
+        showExport(r);
+      }
       return r;
     } catch (e) {
       tasks.setNotice({ type: 'error', text: errorText(e) });
@@ -237,88 +294,67 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     }
   };
 
-  /** 三表文件：整合之后工具栏的导出写的是 MPS / Local / Global 三页。 */
-  const runBundleExport = async (): Promise<ExportResult | null> => {
+  const runToolbarExport = async () => {
+    const week = backend.status?.activeWeek ?? '';
     tasks.begin('导出三表', 0, 2);
     let ok = false;
     try {
-      const r: ExportResult | null = await api.exportBundle(backend.status?.weekCode ?? '');
+      const r: ExportResult | null = await api.exportBundle(week);
       ok = Boolean(r);
-      return r;
+      if (r) {
+        showExport(r);
+      }
     } catch (e) {
       tasks.setNotice({ type: 'error', text: errorText(e) });
-      return null;
     } finally {
       tasks.finish(ok);
     }
   };
 
-  /**
-   * 工具栏的导出：整合之后写 MPS / Local / Global 三表文件。整合前按钮是灰的，
-   * 因为合并结果还不存在；历史窗口仍可单独导出某一周的某一份数据。
-   */
-  const runToolbarExport = async () => {
-    const r = await runBundleExport();
-    if (!r) return;
-    tasks.setNotice({
-      type: 'success',
-      text: `已导出三表文件（MPS / Local / Global，共 ${r.rows.toLocaleString()} 行）→ ${r.destPath}`,
-    });
-  };
-
-  // 清空 is destructive and cannot be undone, so it always asks first; the
-  // dialog spells out how much is at stake and what is left alone.
-  const runClear = () => {
+  const runDiscardDraft = () => {
+    const st = backend.status;
+    if (!st?.hasDraft) return;
     tasks.setNotice(null);
-    const staged =
-      backend.status?.hasStaging && (backend.status.globalRows > 0 || backend.status.localRows > 0)
-        ? `（周码 ${backend.status.weekCode} · Global ${backend.status.globalRows.toLocaleString()} 行 + Local ${backend.status.localRows.toLocaleString()} 行）`
-        : '';
-    // After 整合 there is no temporary data left, but the 已导入文件 list keeps
-    // showing that batch as its record; clearing it must not touch the week.
-    const recordOnly = !backend.status?.hasStaging && (backend.stagedFiles?.fileCount ?? 0) > 0;
     Modal.confirm({
-      title: recordOnly ? '清空已导入文件列表？' : '清空临时数据？',
-      content: recordOnly
-        ? '当前没有未整合的临时数据，将只清空「已导入文件」列表；已整合入库的数据不受影响。'
-        : `将删除尚未整合入库的 Global 与 Local 数据${staged}，已整合入库的数据不受影响。此操作不可撤销。`,
-      okText: '清空',
+      title: '丢弃未完成的 Global 导入？',
+      content: `周码 ${st.draftWeek} · ${st.draftFiles} 个文件 · ${st.draftRows.toLocaleString()} 行。已完成的导入与整合记录不受影响。`,
+      okText: '丢弃',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        tasks.begin('清空', 0, 1);
-        let ok = false;
         try {
-          const r = await api.clearStaging();
-          setGridSource('');
-          setLastEvent({
-            kind: 'cleared',
-            weekCode: r?.weekCode ?? '',
-            files: r?.files ?? 0,
-            rows: r?.rows ?? 0,
-          });
-          showSummary(
-            '已清空未整合的数据',
-            r && r.rows > 0
-              ? [
-                  { label: '周码', value: r.weekCode, strong: true },
-                  { label: '文件数', value: String(r.files) },
-                  { label: '行数', value: r.rows.toLocaleString() },
-                  { label: '已整合数据', value: '不受影响，仍在历史数据中' },
-                ]
-              : [
-                  { label: '临时数据', value: '没有未整合的数据需要清空' },
-                  { label: '已导入列表', value: recordOnly ? '已一并清空' : '本来就是空的' },
-                  { label: '已整合数据', value: '不受影响，仍在历史数据中' },
-                ],
-            'neutral',
-          );
+          await api.discardDraft();
+          setSelectedDataset(0);
+          setLastEvent({ kind: 'cleared', week: st.draftWeek, files: st.draftFiles, rows: st.draftRows });
           await backend.afterChange();
-          ok = true;
+          tasks.setNotice({ type: 'success', text: `已丢弃周码 ${st.draftWeek} 的 Global 导入草稿` });
         } catch (e) {
           tasks.setNotice({ type: 'error', text: errorText(e) });
-        } finally {
-          tasks.finish(ok);
+        }
+      },
+    });
+  };
+
+  const runDiscardWeek = () => {
+    const st = backend.status;
+    if (!st?.activeWeek || !st.canDiscardWeek) return;
+    tasks.setNotice(null);
+    Modal.confirm({
+      title: `丢弃周码 ${st.activeWeek} 未整合的导入？`,
+      content:
+        '会删除本周尚未整合的 Global / Local 数据；历史的整合记录不受影响。' +
+        (st.hasDraft ? '当前未完成的 Global 草稿也会一并丢弃。' : ''),
+      okText: '丢弃',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.discardWeekImports(st.activeWeek);
+          setSelectedDataset(0);
+          await backend.afterChange();
+          tasks.setNotice({ type: 'success', text: `已丢弃周码 ${st.activeWeek} 未整合的导入` });
+        } catch (e) {
+          tasks.setNotice({ type: 'error', text: errorText(e) });
         }
       },
     });
@@ -334,74 +370,61 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     });
   };
 
-  // Which side the grid shows: the user's choice when that side is there, the
-  // one imported last otherwise, and whichever exists as a last resort.
-  const choice = (() => {
-    const s = backend.status;
-    if (!s?.hasStaging) return 'global';
-    if (stagingDataset === 'global' && s.hasGlobal) return 'global';
-    if (stagingDataset === 'local' && s.hasLocal) return 'local';
-    if (s.lastDataset === 'local' && s.hasLocal) return 'local';
-    if (s.lastDataset === 'global' && s.hasGlobal) return 'global';
-    return s.hasGlobal ? 'global' : 'local';
-  })();
+  const status = backend.status;
+  let dataState: DataState = { kind: 'none' };
+  if (status && status.activeWeek) {
+    const selected = selectable(status, selectedDataset) ? selectedDataset : defaultSelection(status);
+    dataState = {
+      kind: 'workspace',
+      status,
+      selected,
+      selectedKind: kindOf(status, selected),
+      replaced: lastEvent.kind === 'workspace' ? lastEvent.replaced : [],
+    };
+  } else if (lastEvent.kind === 'cleared') {
+    dataState = lastEvent;
+  }
 
   return {
-    // The live staging is the truth about the open workbench; without it, the
-    // last 整合 or 清空 is what the data area is showing.
-    dataState: backend.status?.hasStaging
-      ? {
-          kind: 'staging',
-          weekCode: backend.status.weekCode,
-          hasGlobal: backend.status.hasGlobal,
-          hasLocal: backend.status.hasLocal,
-          globalRows: backend.status.globalRows,
-          localRows: backend.status.localRows,
-          dataset: choice,
-          replaced: lastEvent.kind === 'staging' ? lastEvent.replaced : [],
-        }
-      : lastEvent.kind === 'staging'
-        ? { kind: 'none' }
-        : lastEvent,
+    dataState,
     summary,
     closeSummary: () => setSummary((v) => ({ ...v, open: false })),
     importResult,
     importOpen,
     closeImportSummary: () => setImportOpen(false),
-    stagedOpen,
-    // Opening a window is also a step in the workflow: drop the previous
-    // action's notice so it cannot be read as describing this one.
-    openStagedFiles: () => openDialog(setStagedOpen),
-    closeStagedFiles: () => setStagedOpen(false),
+    filesOpen,
+    openFiles: () => openDialog(setFilesOpen),
+    closeFiles: () => setFilesOpen(false),
     settingsOpen,
     openSettings: () => openDialog(setSettingsOpen),
     closeSettings: () => setSettingsOpen(false),
     aboutOpen,
     openAbout: () => openDialog(setAboutOpen),
     closeAbout: () => setAboutOpen(false),
-    historyWeek,
+    historyDatasetId,
     historyDataset,
     historyLoading,
-    openHistory: (week: string, dataset: string) => {
+    openHistory: (datasetId: number, dataset: string) => {
       tasks.setNotice(null);
       setHistoryDataset(dataset || 'merged');
       setHistoryLoading(true);
-      setHistoryWeek(week);
+      setHistoryDatasetId(datasetId);
     },
     closeHistory: () => {
-      setHistoryWeek(null);
+      setHistoryDatasetId(null);
       setHistoryLoading(false);
     },
     historyReady: () => setHistoryLoading(false),
-    gridSource,
-    gridDataset: gridSource === '' ? choice : 'merged',
-    selectStagingDataset: (dataset) => setStagingDataset(dataset),
+    gridDatasetId: dataState.kind === 'workspace' ? dataState.selected : 0,
+    selectDataset: (datasetId: number) => setSelectedDataset(datasetId),
     runImport,
+    runFinishGlobal,
     runImportLocal,
     runCommit,
     runExport,
     runToolbarExport,
-    runClear,
+    runDiscardDraft,
+    runDiscardWeek,
     runQuit,
   };
 }

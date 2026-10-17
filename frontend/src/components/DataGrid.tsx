@@ -7,24 +7,30 @@ import { buildGridColumns } from '../lib/gridColumns';
 import { GridTable } from './GridTable';
 
 export interface DataGridProps {
-  /** "" shows the staging area; a week code shows that committed week. */
-  source: string;
+  /** Which dataset to read; 0 shows the empty grid. */
+  datasetID: number;
   headerDisplay: 'twoRow' | 'oneRow';
   pageSize: number;
   /** Bumped by the parent after an import or commit to force a reload. */
   reloadToken: number;
-  /** Which of a week's three datasets to read; ignored for the staging area. */
-  dataset?: string;
   /** The list's name: 数据清单 plus the state suffix, worded by the shell. */
   title: string;
   /** Shown when there are no rows; the shell words it from the data state. */
   emptyText?: string;
 }
 
-export function DataGrid({ source, dataset, headerDisplay, pageSize, reloadToken, title, emptyText }: DataGridProps) {
+/** The explicit name of the dataset in the title bar: the table's content
+ * changes with the selected side, so this must never be ambiguous. */
+function datasetBadge(kind: string, version: number): string {
+  if (kind === 'merged') return `整合数据 v${version}`;
+  if (kind === 'local') return `Local 数据 v${version}`;
+  if (version === 0) return 'Global 草稿';
+  return `Global 数据 v${version}`;
+}
+
+export function DataGrid({ datasetID, headerDisplay, pageSize, reloadToken, title, emptyText }: DataGridProps) {
   const q = useTableQuery({
-    source,
-    dataset,
+    datasetID: datasetID || null,
     defaultPageSize: pageSize,
     reloadToken,
     // Leaving the previous week's rows under a new week's header would be a lie.
@@ -77,6 +83,33 @@ export function DataGrid({ source, dataset, headerDisplay, pageSize, reloadToken
         }}
       >
         <span>{title}</span>
+        {q.header && (
+          <Tag
+            style={{
+              margin: 0,
+              background: '#fff',
+              color: JNJ.red,
+              border: 'none',
+              fontWeight: 600,
+              fontSize: 12,
+            }}
+          >
+            {datasetBadge(q.header.kind, q.header.version)}
+          </Tag>
+        )}
+        {q.header?.expired && (
+          <Tag
+            style={{
+              margin: 0,
+              background: JNJ.warningSoft,
+              color: JNJ.warning,
+              border: '1px solid #F0DCB8',
+              fontSize: 12,
+            }}
+          >
+            整合已过期
+          </Tag>
+        )}
         {q.header?.weekCode && (
           <Tag
             style={{
@@ -129,7 +162,7 @@ export function DataGrid({ source, dataset, headerDisplay, pageSize, reloadToken
           rows={q.rows}
           columns={columns}
           loading={q.loading}
-          emptyText={emptyText ?? (source === '' ? '暂无临时数据，请使用工具栏的导入或添加' : '该周暂无数据')}
+          emptyText={emptyText ?? '暂无数据，请使用工具栏的导入或添加'}
           scrollX={tableWidth}
           scrollY={bodyHeight > 0 ? bodyHeight : 'calc(100vh - 520px)'}
           onChange={q.onTableChange}
