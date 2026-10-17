@@ -19,7 +19,7 @@ func (a *App) ImportFolder() (out *service.ImportResult, err error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	picked, err := selectPaths("选择包含 MPS 源文件的文件夹", a.lastDir(), false, false, nil)
+	picked, err := selectOneFolder("选择包含 MPS 源文件的文件夹", a.lastDir())
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (a *App) AddFiles() (out *service.ImportResult, err error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	paths, err := selectPaths("选择 MPS 源文件（可多选）", a.lastDir(), true, true,
+	paths, err := selectManyFiles("选择 MPS 源文件（可多选）", a.lastDir(),
 		[]string{"xlsm", "xlsx"})
 	if err != nil {
 		return nil, err
@@ -86,7 +86,7 @@ func (a *App) ImportLocalMPS() (out *service.ImportResult, err error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	paths, err := selectPaths("选择本地 MPS 文件（Month End）", a.lastDir(), false, true,
+	paths, err := selectOneFile("选择本地 MPS 文件（Month End）", a.lastDir(),
 		[]string{"xlsx", "xlsm"})
 	if err != nil {
 		return nil, err

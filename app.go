@@ -43,7 +43,7 @@ import (
 const (
 	AppName    = "CLEAR"
 	AppFull    = "Consolidation & Loading of Enterprise Analytics for Replenishment"
-	AppVersion = "2.1.0"
+	AppVersion = "2.1.1"
 )
 
 // App is the object whose exported methods are bound to the frontend.

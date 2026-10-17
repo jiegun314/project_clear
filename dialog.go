@@ -26,6 +26,14 @@ import (
 // the window is shown, and only the window can call these pickers.
 var dialogCtx context.Context
 
+// The Wails dialog calls are variables so the picker shapes can be tested
+// without opening a native window.
+var (
+	openFileDialog          = wr.OpenFileDialog
+	openMultipleFilesDialog = wr.OpenMultipleFilesDialog
+	openDirectoryDialog     = wr.OpenDirectoryDialog
+)
+
 func setDialogContext(ctx context.Context) { dialogCtx = ctx }
 
 func selectPaths(title, dir string, chooseFiles, multiple bool, filters []string) ([]string, error) {
@@ -34,20 +42,35 @@ func selectPaths(title, dir string, chooseFiles, multiple bool, filters []string
 	}
 	opts := openDialogOptions(title, dir, chooseFiles, filters)
 	if !chooseFiles {
-		picked, err := wr.OpenDirectoryDialog(dialogCtx, opts)
+		picked, err := openDirectoryDialog(dialogCtx, opts)
 		if err != nil || picked == "" {
 			return nil, err
 		}
 		return []string{picked}, nil
 	}
 	if multiple {
-		return wr.OpenMultipleFilesDialog(dialogCtx, opts)
+		return openMultipleFilesDialog(dialogCtx, opts)
 	}
-	picked, err := wr.OpenFileDialog(dialogCtx, opts)
+	picked, err := openFileDialog(dialogCtx, opts)
 	if err != nil || picked == "" {
 		return nil, err
 	}
 	return []string{picked}, nil
+}
+
+// The three picker shapes are named, so a call site cannot swap "files" and
+// "multiple": ImportLocalMPS once passed chooseFiles=false and opened a folder
+// picker instead of a file picker.
+func selectOneFolder(title, dir string) ([]string, error) {
+	return selectPaths(title, dir, false, false, nil)
+}
+
+func selectOneFile(title, dir string, filters []string) ([]string, error) {
+	return selectPaths(title, dir, true, false, filters)
+}
+
+func selectManyFiles(title, dir string, filters []string) ([]string, error) {
+	return selectPaths(title, dir, true, true, filters)
 }
 
 func selectSavePath(title, filename, dir string, filters []string) (string, error) {
