@@ -29,10 +29,12 @@ interface AppBindings {
   AddFiles(): Promise<ImportResult | null>;
   Commit(): Promise<CommitResult>;
   ClearStaging(): Promise<ClearResult>;
-  Export(weekCode: string, mode: string): Promise<ExportResult | null>;
+  ImportLocalMPS(): Promise<ImportResult | null>;
+  Export(weekCode: string, dataset: string, mode: string): Promise<ExportResult | null>;
+  ExportBundle(weekCode: string): Promise<ExportResult | null>;
   RevealExport(path: string): Promise<void>;
   QueryData(q: GridQuery): Promise<GridResult>;
-  GetGridHeader(source: string): Promise<GridHeader>;
+  GetGridHeader(source: string, dataset: string): Promise<GridHeader>;
   GetArchive(): Promise<ArchiveEntry[]>;
   GetYears(): Promise<number[]>;
   GetWeeks(year: number): Promise<number[]>;
@@ -80,10 +82,17 @@ export const api = {
   commit: () => app().Commit(),
   /** Drops every imported-but-unsaved row; integrated weeks are untouched. */
   clearStaging: () => app().ClearStaging(),
-  /** mode is "", "clean" or "template"; "" follows the configured default. */
-  export: (weekCode: string, mode: string) => app().Export(weekCode, mode),
+  /** Asks for one 本地 MPS workbook, checks it and merges it into the staging area. */
+  importLocalMPS: () => app().ImportLocalMPS(),
+  /**
+   * One dataset as the single-sheet report. mode is "", "clean" or "template";
+   * "" follows the configured default.
+   */
+  export: (weekCode: string, dataset: string, mode: string) => app().Export(weekCode, dataset, mode),
+  /** The MPS / Local / Global workbook, with the save dialog's default name. */
+  exportBundle: (weekCode: string) => app().ExportBundle(weekCode),
   queryData: (q: GridQuery) => app().QueryData(q),
-  getGridHeader: (source: string) => app().GetGridHeader(source),
+  getGridHeader: (source: string, dataset: string) => app().GetGridHeader(source, dataset),
   getArchive: () => app().GetArchive(),
   getYears: () => app().GetYears(),
   getWeeks: (year: number) => app().GetWeeks(year),

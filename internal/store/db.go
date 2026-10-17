@@ -32,7 +32,7 @@ const metaSchemaVersion = "schema_version"
 
 // currentSchemaVersion is the schema this release expects. It is bumped only
 // when schemaMigrations gains a step at the end.
-const currentSchemaVersion = 2
+const currentSchemaVersion = 4
 
 // annotationColumns are the per-cell extras added after 1.0. Both are nullable
 // TEXT: a database that predates them simply has no values.
@@ -51,6 +51,8 @@ type sqlQueryer interface {
 var schemaMigrations = []func(sqlQueryer) error{
 	addAnnotationColumns,      // 0 -> 1
 	purgeCommittedStagingRows, // 1 -> 2
+	addArchiveDataset,         // 2 -> 3
+	addStagingDataset,         // 3 -> 4
 }
 
 // Store owns the database handle.
@@ -156,6 +158,98 @@ func migrate(db *sql.DB, path string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// addArchiveDataset gives the archive a dataset column so one week can hold the
+// global rows, the local rows and the merged result side by side.
+//
+// The table is rebuilt rather than altered: SQLite cannot change a primary key in
+// place, and the key has to become (week_code, dataset). Rows written by earlier
+// releases are the merged result of that week, so they move across as such.
+func addArchiveDataset(q sqlQueryer) error {
+	stmts := []string{
+		`ALTER TABLE archive RENAME TO archive_v2`,
+		`CREATE TABLE archive (
+		   week_code      TEXT NOT NULL,
+		   dataset        TEXT NOT NULL DEFAULT 'merged',
+		   week_start     TEXT    NOT NULL,
+		   week_codes     TEXT    NOT NULL,
+		   index_names    TEXT    NOT NULL,
+		   row_count      INTEGER NOT NULL,
+		   file_count     INTEGER NOT NULL,
+		   batch_id       INTEGER,
+		   committed_at   TEXT    NOT NULL,
+		   template_id    INTEGER,
+		   param_snapshot TEXT,
+		   table_name     TEXT    NOT NULL,
+		   PRIMARY KEY (week_code, dataset)
+		 )`,
+		`INSERT INTO archive (week_code, dataset, week_start, week_codes, index_names,
+		                      row_count, file_count, batch_id, committed_at, template_id,
+		                      param_snapshot, table_name)
+		 SELECT week_code, 'merged', week_start, week_codes, index_names,
+		        row_count, file_count, batch_id, committed_at, template_id,
+		        param_snapshot, table_name
+		 FROM archive_v2`,
+		`DROP TABLE archive_v2`,
+	}
+	for _, stmt := range stmts {
+		if _, err := q.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addStagingDataset lets one staging batch hold the global rows, the local rows and
+// the merged result. Rows written by earlier releases are the global ones, which is
+// what a batch held until a local sheet could be imported.
+//
+// stg_row's key has to include the dataset — the same seq appears once per dataset —
+// so that table is rebuilt; batch_file only gains the column.
+func addStagingDataset(q sqlQueryer) error {
+	// Replaying a partly applied upgrade must not fail: if stg_row already carries
+	// the column the work has been done.
+	if has, err := hasColumn(q, "stg_row", "dataset"); err != nil {
+		return err
+	} else if has {
+		return nil
+	}
+	stmts := []string{
+		`ALTER TABLE batch_file ADD COLUMN dataset TEXT NOT NULL DEFAULT 'global'`,
+		`ALTER TABLE stg_row RENAME TO stg_row_v3`,
+		`CREATE TABLE stg_row (
+		   batch_id  INTEGER NOT NULL REFERENCES batch(id) ON DELETE CASCADE,
+		   seq       INTEGER NOT NULL,
+		   file_id   INTEGER,
+		   file_name TEXT,
+		   src_row   INTEGER NOT NULL DEFAULT 0,
+		   c1 TEXT, c2 TEXT, c3 TEXT, c4 TEXT, c5 TEXT,
+		   c6 TEXT, c7 TEXT, c8 TEXT, c9 TEXT, c10 TEXT,
+		   c11 TEXT, c12 TEXT, c13 TEXT, c14 TEXT, c15 TEXT,
+		   weeks     TEXT NOT NULL,
+		   style_ids TEXT NOT NULL,
+		   cf_id     INTEGER,
+		   comments  TEXT,
+		   cf_colors TEXT,
+		   dataset   TEXT NOT NULL DEFAULT 'global',
+		   PRIMARY KEY (batch_id, dataset, seq)
+		 )`,
+		`INSERT INTO stg_row (batch_id, seq, file_id, file_name, src_row,
+		                     c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
+		                     weeks, style_ids, cf_id, comments, cf_colors, dataset)
+		 SELECT batch_id, seq, file_id, file_name, src_row,
+		        c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
+		        weeks, style_ids, cf_id, comments, cf_colors, 'global'
+		 FROM stg_row_v3`,
+		`DROP TABLE stg_row_v3`,
+	}
+	for _, stmt := range stmts {
+		if _, err := q.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addAnnotationColumns brings a database written by an earlier release up to the

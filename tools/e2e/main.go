@@ -19,6 +19,7 @@ import (
 
 func main() {
 	in := flag.String("in", "raw_data/mps_data", "folder of source workbooks")
+	local := flag.String("local", "raw_data/BW_CN_MPS Week39 2026 (Month End).xlsx", "the 本地 MPS workbook merged in before 整合")
 	out := flag.String("out", "/tmp/clear-e2e", "scratch folder for the database and export")
 	clean := flag.Bool("clean", false, "use the clean rebuild export engine")
 	keep := flag.Bool("keep", false, "keep the scratch folder from a previous run")
@@ -26,6 +27,7 @@ func main() {
 
 	err := harness.Run(harness.Options{
 		In:     *in,
+		Local:  *local,
 		Out:    *out,
 		Clean:  *clean,
 		Keep:   *keep,

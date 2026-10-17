@@ -36,6 +36,9 @@ import (
 type Options struct {
 	// In is the folder of source workbooks.
 	In string
+	// Local is the 本地 MPS workbook that is merged into the global data before
+	// 整合. The pipeline requires it, so the acceptance run does too.
+	Local string
 	// Out is the scratch folder holding the database, configuration, logs and the
 	// exported file. Nothing outside it is written.
 	Out string
@@ -129,6 +132,31 @@ func Run(opt Options) error {
 	}
 	r.mark("暂存可查询: %d 行, 首页 %d 行", grid.Total, len(grid.Rows))
 
+	// ---- local MPS import ----------------------------------------------
+	if opt.Local == "" {
+		return errors.New("acceptance run needs a local MPS workbook (Options.Local)")
+	}
+	local, err := svc.ImportLocal(opt.Local, func(stage string, done, total int) {
+		r.mark("  %s %d/%d", stage, done, total)
+	})
+	if err != nil {
+		return fmt.Errorf("import local: %w", err)
+	}
+	sum, err := svc.StagingSummary()
+	if err != nil {
+		return fmt.Errorf("staging summary: %w", err)
+	}
+	r.mark("本地导入完成: 本地 %d 行；工作台 Global %d 行 / Local %d 行",
+		local.LocalRows, sum.Rows(store.DatasetGlobal), sum.Rows(store.DatasetLocal))
+	// Before 整合 the grid shows one imported side at a time; both are queryable.
+	for _, set := range []string{store.DatasetGlobal, store.DatasetLocal} {
+		g, err := svc.Query(store.Query{Source: "", Dataset: set, Page: 1, PageSize: 5, SortField: "seq"})
+		if err != nil {
+			return fmt.Errorf("staging %s query: %w", set, err)
+		}
+		r.mark("暂存 %s 可查询: %d 行", set, g.Total)
+	}
+
 	// ---- commit --------------------------------------------------------
 	entry, overwrote, err := svc.Commit()
 	if err != nil {
@@ -148,11 +176,16 @@ func Run(opt Options) error {
 	if opt.Clean {
 		mode = config.ExportClean
 	}
-	stats, err := svc.Export(service.ExportOptions{WeekCode: entry.WeekCode, DestPath: dest, Mode: mode}, nil)
+	// The fidelity audit compares the exported sheet with the global source
+	// workbooks, so it exports the Global dataset: the merged result also carries
+	// the local rows, which have no source workbook to compare against.
+	stats, err := svc.Export(service.ExportOptions{
+		WeekCode: entry.WeekCode, Dataset: store.DatasetGlobal, DestPath: dest, Mode: mode,
+	}, nil)
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
-	r.mark("导出完成: %s (%d 字节)", dest, stats.SizeBytes)
+	r.mark("导出完成 (Global): %s (%d 字节)", dest, stats.SizeBytes)
 	fmt.Fprintf(r.out, "    mode=%s rows=%d cols=%d styles=%d cfRows=%d comments=%d dropped=%d vba=%v\n",
 		stats.Mode, stats.Rows, stats.Cols, stats.StylesUsed, stats.CFRows, stats.Comments,
 		stats.CFRulesDropped, stats.PreservedVBA)
@@ -162,17 +195,42 @@ func Run(opt Options) error {
 		return fmt.Errorf("audit: %w", err)
 	}
 
+	// ---- 三表文件 -------------------------------------------------------
+	bw, err := mps.ParseWeekCode(entry.WeekCode)
+	if err != nil {
+		return err
+	}
+	bundleDest := filepath.Join(opt.Out, fmt.Sprintf("BW_CN_MPS Week%d %d.xlsx", bw.WeekNo, bw.FullYear()))
+	bundle, err := svc.ExportBundle(service.BundleExportOptions{WeekCode: entry.WeekCode, DestPath: bundleDest}, nil)
+	if err != nil {
+		return fmt.Errorf("bundle export: %w", err)
+	}
+	if err := r.auditBundle(bundleDest, entry.RowCount); err != nil {
+		return fmt.Errorf("bundle audit: %w", err)
+	}
+	r.mark("三表导出完成: %s (%d 字节, %d 页)", bundleDest, bundle.SizeBytes, bundle.Sheets)
+
 	// ---- 重复整合：同一周码只能有一份，时间标签换成新的 ----------------
 	// 查询界面（历史数据）读的是 archive 表，临时数据不该混进去。
 	if _, err := svc.ImportFolder(opt.In, nil); err != nil {
 		return fmt.Errorf("re-import: %w", err)
 	}
+	// A fresh global import starts a new staging batch, so the local sheet has to
+	// be merged in again before the week can be integrated.
+	if _, err := svc.ImportLocal(opt.Local, nil); err != nil {
+		return fmt.Errorf("re-import local: %w", err)
+	}
 	duringStaging, err := db.ListArchive()
 	if err != nil {
 		return fmt.Errorf("list archive during staging: %w", err)
 	}
-	if len(duringStaging) != 1 || duringStaging[0].WeekCode != entry.WeekCode {
-		return fmt.Errorf("有临时数据时归档列表 = %+v, 应当仍只有 %s 一份", duringStaging, entry.WeekCode)
+	if len(duringStaging) != 3 {
+		return fmt.Errorf("有临时数据时归档列表有 %d 条, 应当仍只有 %s 的三份数据", len(duringStaging), entry.WeekCode)
+	}
+	for _, e := range duringStaging {
+		if e.WeekCode != entry.WeekCode {
+			return fmt.Errorf("有临时数据时归档出现别的周码: %+v", e)
+		}
 	}
 	r.mark("重复整合: 未整合的临时数据未出现在查询列表")
 
@@ -187,14 +245,20 @@ func Run(opt Options) error {
 	if err != nil {
 		return fmt.Errorf("list archive after re-commit: %w", err)
 	}
-	if len(after) != 1 {
-		return fmt.Errorf("重复整合后归档有 %d 条记录, 应当只有 %s 一条", len(after), entry.WeekCode)
+	if len(after) != 3 {
+		return fmt.Errorf("重复整合后归档有 %d 条记录, 应当只有 %s 的三份数据", len(after), entry.WeekCode)
 	}
-	if after[0].WeekCode != entry.WeekCode {
-		return fmt.Errorf("重复整合后归档周码 = %s, 期望 %s", after[0].WeekCode, entry.WeekCode)
+	mergedAfter := store.ArchiveEntry{}
+	for _, e := range after {
+		if e.WeekCode != entry.WeekCode {
+			return fmt.Errorf("重复整合后归档周码 = %s, 期望 %s", e.WeekCode, entry.WeekCode)
+		}
+		if e.Dataset == store.DatasetMerged {
+			mergedAfter = e
+		}
 	}
-	if after[0].CommittedAt == "" || after[0].CommittedAt != again.CommittedAt {
-		return fmt.Errorf("整合时间未刷新: 归档 %q, 本次返回 %q", after[0].CommittedAt, again.CommittedAt)
+	if mergedAfter.CommittedAt == "" || mergedAfter.CommittedAt != again.CommittedAt {
+		return fmt.Errorf("整合时间未刷新: 归档 %q, 本次返回 %q", mergedAfter.CommittedAt, again.CommittedAt)
 	}
 	grid2, err := svc.Query(store.Query{Source: entry.WeekCode, Page: 1, PageSize: 1, SortField: "seq"})
 	if err != nil {
@@ -207,6 +271,60 @@ func Run(opt Options) error {
 		entry.WeekCode, grid2.Total, entry.CommittedAt, again.CommittedAt)
 
 	fmt.Fprintln(r.out, "\n全部检查通过。")
+	return nil
+}
+
+// auditBundle checks the three-table workbook: MPS, Local and Global in that
+// order, each with the business header, and the merged sheet holding every row
+// 整合 stored.
+func (r *Runner) auditBundle(path string, mergedRows int) error {
+	f, err := excelize.OpenFile(path)
+	if err != nil {
+		return fmt.Errorf("三表文件无法打开: %w", err)
+	}
+	defer f.Close()
+
+	names := f.GetSheetList()
+	if strings.Join(names, ",") != strings.Join(mps.BundleSheetNames, ",") {
+		return fmt.Errorf("三表文件的工作表 = %v, 期望 %v", names, mps.BundleSheetNames)
+	}
+	for i, name := range names {
+		rows, err := f.GetRows(name, excelize.Options{RawCellValue: true})
+		if err != nil {
+			return fmt.Errorf("读取 %s: %w", name, err)
+		}
+		if len(rows) < mps.FirstDataRowOfBundle {
+			return fmt.Errorf("%s 只有 %d 行, 缺少表头或数据", name, len(rows))
+		}
+		if got := rows[0][8]; got != "ITEM" {
+			return fmt.Errorf("%s I1 = %q, 期望 ITEM", name, got)
+		}
+		if got := rows[0][mps.FirstWeekCol-1]; got != "2639" {
+			return fmt.Errorf("%s P1 = %q, 期望周码 2639", name, got)
+		}
+		// The used range must cover the data: read_only readers trust it, so a
+		// dimension left at A1 makes the sheet look empty to them.
+		lastCol, err := mps.ColumnName(len(rows[0]))
+		if err != nil {
+			return err
+		}
+		wantDim := fmt.Sprintf("A1:%s%d", lastCol, len(rows))
+		dim, err := f.GetSheetDimension(name)
+		if err != nil {
+			return fmt.Errorf("%s dimension: %w", name, err)
+		}
+		if dim != wantDim {
+			return fmt.Errorf("%s dimension = %q, 期望 %q（共 %d 行 × %d 列）", name, dim, wantDim, len(rows), len(rows[0]))
+		}
+		data := len(rows) - (mps.FirstDataRowOfBundle - 1)
+		if data <= 0 {
+			return fmt.Errorf("%s 没有数据行", name)
+		}
+		if i == 0 && data != mergedRows {
+			return fmt.Errorf("MPS 页 %d 行, 整合结果 %d 行", data, mergedRows)
+		}
+		r.mark("审计: %s 页 %d 行", name, data)
+	}
 	return nil
 }
 

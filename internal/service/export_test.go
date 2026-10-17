@@ -53,16 +53,15 @@ func writeSourceFolder(t *testing.T) string {
 		_ = idx
 	}
 
-	for c := 1; c <= mps.IndexCols; c++ {
-		if err := f.SetCellStr(mps.SheetName, mps.CellRef(c, mps.HeaderRow), fmt.Sprintf("H%d", c)); err != nil {
+	// The real MPS index block: the 本地 MPS reader insists on this layout, and
+	// the merged result carries it, so the fixture uses it for both sides.
+	for c, name := range mpsIndexNames {
+		if err := f.SetCellStr(mps.SheetName, mps.CellRef(c+1, mps.HeaderRow), name); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Decoration above the header, which the export must not carry over.
 	_ = f.SetCellStr(mps.SheetName, "A1", "SUMMARY (click on left \"+\" to open or hide the Summary section)")
-	if err := f.SetCellStr(mps.SheetName, mps.CellRef(mps.LOCCol, mps.HeaderRow), "LOC"); err != nil {
-		t.Fatal(err)
-	}
 	const readColumns = 3
 	weeks := []string{"2639", "2640", "2641"}
 	for i, code := range weeks {
@@ -112,23 +111,21 @@ func writeSourceFolder(t *testing.T) string {
 // staging at all, so no week could be resolved.
 func TestExportWithoutWeekFollowsTheGrid(t *testing.T) {
 	svc, dir := newTestService(t)
-	if _, err := svc.ImportFolder(writeSourceFolder(t), nil); err != nil {
-		t.Fatalf("import: %v", err)
-	}
+	importBoth(t, svc)
 
-	// 1. imported but not yet integrated: the staging area is what is on screen.
+	// 1. imported but not yet integrated: the grid shows the side imported last
+	// (local), and that is what this export follows.
 	staged := filepath.Join(dir, "staged.xlsx")
 	stats, err := svc.Export(ExportOptions{DestPath: staged}, nil)
 	if err != nil {
 		t.Fatalf("export staging: %v", err)
 	}
 	if stats.Rows != 1 {
-		t.Errorf("staging export rows = %d, want 1", stats.Rows)
+		t.Errorf("staging export rows = %d, want 1 (the local side)", stats.Rows)
 	}
 	assertOnlyMPS(t, staged)
-	assertHeaderIsFirstRow(t, staged)
-	assertCell(t, staged, "P4", "100")
-	assertComment(t, staged, "P4", "PO 9578 & 9579 receipts", "Alice")
+	assertHeaderIsFirstRow(t, staged, "P5")
+	assertCell(t, staged, "P4", "500")
 
 	// 2. after 整合, with the staging batch promoted.
 	if _, _, err := svc.Commit(); err != nil {
@@ -139,11 +136,11 @@ func TestExportWithoutWeekFollowsTheGrid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("export after commit: %v", err)
 	}
-	if stats.Rows != 1 {
-		t.Errorf("committed export rows = %d, want 1", stats.Rows)
+	if stats.Rows != 2 {
+		t.Errorf("committed export rows = %d, want 2", stats.Rows)
 	}
 	assertOnlyMPS(t, committed)
-	assertHeaderIsFirstRow(t, committed)
+	assertHeaderIsFirstRow(t, committed, "IDX-1")
 	assertCell(t, committed, "P4", "100")
 	assertComment(t, committed, "P4", "PO 9578 & 9579 receipts", "Alice")
 }
@@ -151,9 +148,7 @@ func TestExportWithoutWeekFollowsTheGrid(t *testing.T) {
 // An explicit week (the history panel) still wins over the grid's contents.
 func TestExportNamedWeek(t *testing.T) {
 	svc, dir := newTestService(t)
-	if _, err := svc.ImportFolder(writeSourceFolder(t), nil); err != nil {
-		t.Fatalf("import: %v", err)
-	}
+	importBoth(t, svc)
 	if _, _, err := svc.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -170,9 +165,7 @@ func TestExportNamedWeek(t *testing.T) {
 // the MPS page only.
 func TestTemplateExportKeepsOnlyMPS(t *testing.T) {
 	svc, dir := newTestService(t)
-	if _, err := svc.ImportFolder(writeSourceFolder(t), nil); err != nil {
-		t.Fatalf("import: %v", err)
-	}
+	importBoth(t, svc)
 	if _, _, err := svc.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -185,13 +178,13 @@ func TestTemplateExportKeepsOnlyMPS(t *testing.T) {
 		t.Errorf("mode = %q, want template", stats.Mode)
 	}
 	assertOnlyMPS(t, dest)
-	assertHeaderIsFirstRow(t, dest)
+	assertHeaderIsFirstRow(t, dest, "IDX-1")
 	assertCell(t, dest, "P4", "100")
 }
 
 // The exported sheet starts at the header: the report's decorative rows are not
 // part of the data and are left out entirely, in both export modes.
-func assertHeaderIsFirstRow(t *testing.T, path string) {
+func assertHeaderIsFirstRow(t *testing.T, path, wantFirst string) {
 	t.Helper()
 	f, err := excelize.OpenFile(path)
 	if err != nil {
@@ -208,14 +201,14 @@ func assertHeaderIsFirstRow(t *testing.T, path string) {
 		}
 		return rows[r][c]
 	}
-	if got := at(mps.ExportHeaderRow-1, 0); got != "H1" {
+	if got := at(mps.ExportHeaderRow-1, 0); got != "P5" {
 		t.Errorf("%s A%d = %q, want the index header", filepath.Base(path), mps.ExportHeaderRow, got)
 	}
 	if got := at(mps.ExportHeaderRow-1, mps.FirstWeekCol-1); got != "2639" {
 		t.Errorf("%s P%d = %q, want the week code", filepath.Base(path), mps.ExportHeaderRow, got)
 	}
-	if got := at(mps.ExportFirstDataRow-1, 0); got != "IDX-1" {
-		t.Errorf("%s A%d = %q, want the first data row", filepath.Base(path), mps.ExportFirstDataRow, got)
+	if got := at(mps.ExportFirstDataRow-1, 0); got != wantFirst {
+		t.Errorf("%s A%d = %q, want %q", filepath.Base(path), mps.ExportFirstDataRow, got, wantFirst)
 	}
 	for r, row := range rows {
 		for c, v := range row {

@@ -21,13 +21,13 @@ func (a *App) QueryData(q view.GridQuery) (out *store.GridResult, err error) {
 		q.PageSize = c.PageSize
 	}
 	return a.svc.Query(store.Query{
-		Source: q.Source, Page: q.Page, PageSize: q.PageSize,
+		Source: q.Source, Dataset: q.Dataset, Page: q.Page, PageSize: q.PageSize,
 		Search: q.Search, SortField: q.SortField, SortDesc: q.SortDesc, Filters: q.Filters,
 	})
 }
 
 // GetGridHeader returns the column layout for a source.
-func (a *App) GetGridHeader(source string) (out *view.GridHeader, err error) {
+func (a *App) GetGridHeader(source, dataset string) (out *view.GridHeader, err error) {
 	defer a.recoverFault("GetGridHeader", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func (a *App) GetGridHeader(source string) (out *view.GridHeader, err error) {
 	if source != "" && !store.ValidWeekCode(source) {
 		return nil, fmt.Errorf("非法周码 %q", source)
 	}
-	src, err := a.svc.GridSource(source)
+	src, err := a.svc.GridSource(source, dataset)
 	if err != nil {
 		return nil, err
 	}

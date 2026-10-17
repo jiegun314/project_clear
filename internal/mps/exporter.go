@@ -83,6 +83,9 @@ type ExportStats struct {
 	SizeBytes      int64 `json:"sizeBytes"`
 	// Warnings lists the detail that could not be reproduced in the output.
 	Warnings []string `json:"warnings,omitempty"`
+	// Sheets is how many worksheets the export wrote: 1 for the template report,
+	// 3 for the MPS / Local / Global bundle.
+	Sheets int `json:"sheets"`
 }
 
 // warn records a detail that could not be reproduced.

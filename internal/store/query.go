@@ -15,6 +15,9 @@ import (
 type Query struct {
 	// Source is "" for the staging area or a week code such as "2639".
 	Source string
+	// Dataset picks which of a week's three datasets to read; empty means the
+	// merged result. It is ignored for the staging area.
+	Dataset string
 	// Page is 1-based.
 	Page int
 	// PageSize caps the rows returned.
@@ -58,30 +61,43 @@ type GridResult struct {
 }
 
 // sourceSQL resolves a query source into a table name and a flag telling
-// whether it is the staging area.
-func (s *Store) sourceSQL(q Query) (table string, staging bool, weekCodes []string, indexNames []string, err error) {
+// whether it is the staging area. stagingDataset names the dataset the staging
+// area shows: the merged result once the local file is imported, else global.
+func (s *Store) sourceSQL(q Query) (table string, staging bool, stagingDataset string, weekCodes []string, indexNames []string, err error) {
 	if q.Source == "" {
 		sum, err := s.LoadStaging()
 		if err != nil {
-			return "", false, nil, nil, err
+			return "", false, "", nil, nil, err
 		}
 		if !sum.HasStaging {
-			return "", false, nil, nil, fmt.Errorf("没有临时数据")
+			return "", false, "", nil, nil, fmt.Errorf("没有临时数据")
 		}
-		return "stg_row", true, sum.WeekCodes, sum.IndexNames, nil
+		// Before 整合 the grid shows one of the two imported sides. An explicit
+		// dataset wins when it is actually there; otherwise the last import does.
+		set := sum.DisplayDataset()
+		if q.Dataset != "" {
+			named, err := normaliseDataset(q.Dataset)
+			if err != nil {
+				return "", false, "", nil, nil, err
+			}
+			if sum.Has(named) {
+				set = named
+			}
+		}
+		return "stg_row", true, set, sum.WeekCodes, sum.IndexNames, nil
 	}
 	code, err := mustWeek(q.Source)
 	if err != nil {
-		return "", false, nil, nil, err
+		return "", false, "", nil, nil, err
 	}
-	entry, err := s.ArchiveEntryFor(code)
+	entry, err := s.ArchiveEntryFor(code, q.Dataset)
 	if err != nil {
-		return "", false, nil, nil, err
+		return "", false, "", nil, nil, err
 	}
 	if entry == nil {
-		return "", false, nil, nil, fmt.Errorf("周码 %s 尚未整合入库", code)
+		return "", false, "", nil, nil, fmt.Errorf("周码 %s 尚未整合入库", code)
 	}
-	return entry.TableName, false, entry.WeekCodes, entry.IndexNames, nil
+	return entry.TableName, false, "", entry.WeekCodes, entry.IndexNames, nil
 }
 
 // weekExpr is the SQL expression for a week cell. Committed tables have a real
@@ -136,7 +152,7 @@ func sortColumn(field string, weekCodes []string, staging bool) string {
 
 // QueryRows returns one page of rows.
 func (s *Store) QueryRows(q Query) (*GridResult, error) {
-	table, staging, weekCodes, _, err := s.sourceSQL(q)
+	table, staging, stagingDataset, weekCodes, _, err := s.sourceSQL(q)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +172,8 @@ func (s *Store) QueryRows(q Query) (*GridResult, error) {
 	var args []any
 	if staging {
 		where = append(where, "batch_id = (SELECT id FROM batch WHERE status='staging' ORDER BY id DESC LIMIT 1)")
+		where = append(where, "dataset = ?")
+		args = append(args, stagingDataset)
 	}
 	if kw := strings.TrimSpace(q.Search); kw != "" {
 		like := "%" + kw + "%"
@@ -414,9 +432,14 @@ type ExportRow struct {
 	SourceRow int
 }
 
-// FetchExportRows reads a committed week in full, for export.
+// FetchExportRows reads a committed week's merged result in full, for export.
 func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, error) {
-	entry, err := s.ArchiveEntryFor(weekCode)
+	return s.FetchExportRowsOf(weekCode, DatasetMerged)
+}
+
+// FetchExportRowsOf reads one dataset of a committed week in full.
+func (s *Store) FetchExportRowsOf(weekCode, dataset string) (*ArchiveEntry, []ExportRow, error) {
+	entry, err := s.ArchiveEntryFor(weekCode, dataset)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -495,13 +518,27 @@ func (s *Store) FetchExportRows(weekCode string) (*ArchiveEntry, []ExportRow, er
 // FetchStagingExportRows reads the staging area in the same shape as a
 // committed week, so 导出 works on data that has been imported but not yet
 // integrated — the merged rows the main grid is showing.
-func (s *Store) FetchStagingExportRows() (*StagingSummary, []ExportRow, error) {
+//
+// An empty dataset means what the grid shows (merged once the local file has
+// been imported, global before that); the three-table export names each one
+// explicitly.
+func (s *Store) FetchStagingExportRows(dataset string) (*StagingSummary, []ExportRow, error) {
 	sum, err := s.LoadStaging()
 	if err != nil {
 		return nil, nil, err
 	}
 	if !sum.HasStaging {
 		return nil, nil, fmt.Errorf("没有待导出的临时数据")
+	}
+	set := sum.DisplayDataset()
+	if strings.ToLower(strings.TrimSpace(dataset)) != "" {
+		set, err = normaliseDataset(dataset)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !sum.Has(set) {
+			return nil, nil, fmt.Errorf("临时数据里没有 %s 数据集", set)
+		}
 	}
 
 	// Loaded up front: the pool allows one connection, so a second query
@@ -518,8 +555,8 @@ func (s *Store) FetchStagingExportRows() (*StagingSummary, []ExportRow, error) {
 	}
 	cols = append(cols, "weeks", "style_ids", "cf_id", "comments", "file_name", "src_row")
 
-	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM stg_row WHERE batch_id=? ORDER BY seq`,
-		strings.Join(cols, ",")), sum.BatchID)
+	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM stg_row WHERE batch_id=? AND dataset=? ORDER BY seq`,
+		strings.Join(cols, ",")), sum.BatchID, set)
 	if err != nil {
 		return nil, nil, err
 	}

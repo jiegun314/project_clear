@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"project_clear/internal/config"
+	"project_clear/internal/mps"
 	"project_clear/internal/service"
 	"project_clear/internal/view"
 
@@ -14,9 +15,11 @@ import (
 
 // ---------------------------------------------------------------- export
 
-// Export asks where to save the data and writes it. An empty mode uses the
-// configured default (纯数据); "clean" and "template" force one engine.
-func (a *App) Export(weekCode string, mode string) (out *view.ExportResult, err error) {
+// Export asks where to save one dataset and writes it as the single-sheet
+// report. An empty mode uses the configured default (纯数据); "clean" and
+// "template" force one engine. The dataset is what the history window picked:
+// global, local or merged (empty means merged).
+func (a *App) Export(weekCode string, dataset string, mode string) (out *view.ExportResult, err error) {
 	defer a.recoverFault("Export", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
@@ -51,7 +54,7 @@ func (a *App) Export(weekCode string, mode string) (out *view.ExportResult, err 
 	if !strings.EqualFold(filepath.Ext(dest), ext) {
 		dest = strings.TrimSuffix(dest, filepath.Ext(dest)) + ext
 	}
-	res, err := a.svc.Export(service.ExportOptions{WeekCode: weekCode, DestPath: dest, Mode: effective}, a.progress)
+	res, err := a.svc.Export(service.ExportOptions{WeekCode: weekCode, Dataset: dataset, DestPath: dest, Mode: effective}, a.progress)
 	if err != nil {
 		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
 		return nil, err
@@ -62,6 +65,48 @@ func (a *App) Export(weekCode string, mode string) (out *view.ExportResult, err 
 		Comments: res.Comments, CFRows: res.CFRows, StylesUsed: res.StylesUsed,
 		Dropped: res.CFRulesDropped, SizeBytes: res.SizeBytes,
 		PreservedVBA: res.PreservedVBA, DurationMS: res.DurationMS,
+		Sheets: res.Sheets,
+	}, nil
+}
+
+// ExportBundle asks where to save and writes the three-table workbook: MPS (the
+// merged result), Local and Global, one sheet each. The save dialog offers the
+// name the business uses for that week.
+func (a *App) ExportBundle(weekCode string) (out *view.ExportResult, err error) {
+	defer a.recoverFault("ExportBundle", &err)
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	target := a.svc.ExportWeek(weekCode)
+	if target == "" {
+		return nil, fmt.Errorf("没有可导出的数据，请先导入文件")
+	}
+	w, err := mps.ParseWeekCode(target)
+	if err != nil {
+		return nil, err
+	}
+	name := fmt.Sprintf("BW_CN_MPS Week%d %d.xlsx", w.WeekNo, w.FullYear())
+	dest, err := selectSavePath("导出三表文件（MPS / Local / Global）", name, a.lastDir(),
+		[]string{"xlsx"})
+	if err != nil {
+		return nil, err
+	}
+	if dest == "" {
+		return nil, nil
+	}
+	a.rememberDir(filepath.Dir(dest))
+	if !strings.EqualFold(filepath.Ext(dest), ".xlsx") {
+		dest = strings.TrimSuffix(dest, filepath.Ext(dest)) + ".xlsx"
+	}
+	res, err := a.svc.ExportBundle(service.BundleExportOptions{WeekCode: weekCode, DestPath: dest}, a.progress)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
+		return nil, err
+	}
+	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
+	return &view.ExportResult{
+		DestPath: dest, Mode: res.Mode, Rows: res.Rows, Cols: res.Cols,
+		SizeBytes: res.SizeBytes, DurationMS: res.DurationMS, Sheets: res.Sheets,
 	}, nil
 }
 

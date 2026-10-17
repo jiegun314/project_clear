@@ -4,10 +4,11 @@ import { History, Eye } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
 import type { ArchiveEntry } from '../types';
+import { DatasetTag } from './DatasetTag';
 
 export interface HistoryPanelProps {
   /** Fixed minimum width, as required: the panel must not follow the window. */
-  onView: (weekCode: string) => void;
+  onView: (weekCode: string, dataset: string) => void;
   reloadToken: number;
 }
 
@@ -71,6 +72,11 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
 
   const weekCode = year != null && week != null ? `${String(year % 100).padStart(2, '0')}${String(week).padStart(2, '0')}` : null;
   const known = weekCode ? archive.some((e) => e.weekCode === weekCode) : false;
+  // 查看 opens the merged result when the week has one; otherwise whatever
+  // dataset the week does have, so a half-integrated week stays reachable.
+  const target =
+    archive.find((e) => e.weekCode === weekCode && e.dataset === 'merged') ??
+    archive.find((e) => e.weekCode === weekCode);
 
   return (
     <div
@@ -101,7 +107,7 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
         <History size={14} />
         <span>历史数据</span>
         <span style={{ marginLeft: 'auto', fontWeight: 400, opacity: 0.92, fontSize: 12 }}>
-          {archive.length} 周
+          {new Set(archive.map((e) => e.weekCode)).size} 周
         </span>
       </div>
 
@@ -130,7 +136,7 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
           icon={<Eye size={15} />}
           block
           disabled={!weekCode || !known}
-          onClick={() => weekCode && onView(weekCode)}
+          onClick={() => weekCode && target && onView(target.weekCode, target.dataset)}
           style={{ background: JNJ.red, borderColor: JNJ.red }}
         >
           查看
@@ -152,8 +158,8 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
         ) : (
           archive.map((e) => (
             <div
-              key={e.weekCode}
-              onClick={() => onView(e.weekCode)}
+              key={`${e.weekCode}/${e.dataset}`}
+              onClick={() => onView(e.weekCode, e.dataset)}
               style={{
                 padding: '7px 12px',
                 borderBottom: `1px solid ${JNJ.divider}`,
@@ -161,14 +167,27 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
                 background: e.weekCode === weekCode ? JNJ.redSoft : undefined,
               }}
             >
-              <div style={{ fontWeight: 600, color: JNJ.ink, fontSize: 13 }}>
-                {e.weekCode} <span style={{ fontWeight: 400, color: JNJ.textMuted, fontSize: 12 }}>{e.weekStart}</span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  color: JNJ.ink,
+                  fontSize: 13,
+                }}
+              >
+                <DatasetTag dataset={e.dataset} />
+                <span>{e.weekCode}</span>
+                <span style={{ fontWeight: 400, color: JNJ.textMuted, fontSize: 12 }}>
+                  {e.weekStart}
+                </span>
               </div>
               <div style={{ fontSize: 12, color: JNJ.text }}>
                 {e.year} 年第 {e.weekNo} 周 · {e.rowCount.toLocaleString()} 行 / {e.fileCount} 个文件
               </div>
               <div style={{ fontSize: 11, color: JNJ.textMuted }}>
-                整合于 {e.committedAt}
+                创建于 {e.committedAt}
               </div>
             </div>
           ))

@@ -2,6 +2,8 @@ package service
 
 import (
 	"testing"
+
+	"project_clear/internal/store"
 	"time"
 )
 
@@ -37,7 +39,7 @@ func TestWaitIdleWaitsForTheOperationInProgress(t *testing.T) {
 func TestGridSourceResolvesStagingAndCommittedWeeks(t *testing.T) {
 	svc, _ := newTestService(t)
 
-	empty, err := svc.GridSource("")
+	empty, err := svc.GridSource("", store.DatasetMerged)
 	if err != nil {
 		t.Fatalf("empty source: %v", err)
 	}
@@ -45,12 +47,9 @@ func TestGridSourceResolvesStagingAndCommittedWeeks(t *testing.T) {
 		t.Errorf("nothing is imported, but staging was reported present: %+v", empty)
 	}
 
-	folder := writeSourceFolder(t)
-	if _, err := svc.ImportFolder(folder, nil); err != nil {
-		t.Fatalf("import: %v", err)
-	}
+	importBoth(t, svc)
 
-	staged, err := svc.GridSource("")
+	staged, err := svc.GridSource("", store.DatasetMerged)
 	if err != nil {
 		t.Fatalf("staging source: %v", err)
 	}
@@ -66,7 +65,7 @@ func TestGridSourceResolvesStagingAndCommittedWeeks(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	committed, err := svc.GridSource(week)
+	committed, err := svc.GridSource(week, store.DatasetMerged)
 	if err != nil {
 		t.Fatalf("committed source: %v", err)
 	}
@@ -82,7 +81,7 @@ func TestGridSourceResolvesStagingAndCommittedWeeks(t *testing.T) {
 
 	// A week code that is valid but has never been integrated is empty, not an
 	// error: the grid shows its placeholder.
-	missing, err := svc.GridSource("9999")
+	missing, err := svc.GridSource("9999", store.DatasetMerged)
 	if err != nil {
 		t.Fatalf("unknown week: %v", err)
 	}
@@ -96,11 +95,7 @@ func TestGridSourceResolvesStagingAndCommittedWeeks(t *testing.T) {
 // it describe a different batch.
 func TestCommitReportsWhetherItReplacedAWeek(t *testing.T) {
 	svc, _ := newTestService(t)
-	folder := writeSourceFolder(t)
-
-	if _, err := svc.ImportFolder(folder, nil); err != nil {
-		t.Fatalf("import: %v", err)
-	}
+	importBoth(t, svc)
 	entry, overwrote, err := svc.Commit()
 	if err != nil {
 		t.Fatalf("first commit: %v", err)
@@ -109,8 +104,11 @@ func TestCommitReportsWhetherItReplacedAWeek(t *testing.T) {
 		t.Error("the first commit reported replacing an existing week")
 	}
 
-	if _, err := svc.ImportFolder(folder, nil); err != nil {
+	if _, err := svc.ImportFolder(writeSourceFolder(t), nil); err != nil {
 		t.Fatalf("re-import: %v", err)
+	}
+	if _, err := svc.ImportLocal(writeLocalFile(t), nil); err != nil {
+		t.Fatalf("re-import local: %v", err)
 	}
 	again, overwroteAgain, err := svc.Commit()
 	if err != nil {

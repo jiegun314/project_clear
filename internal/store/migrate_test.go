@@ -213,3 +213,86 @@ func TestUpgradePurgesTheStagingRowsOfCommittedWeeks(t *testing.T) {
 		t.Errorf("version = %d (err %v), want %d", got, err, currentSchemaVersion)
 	}
 }
+
+// 升级到三份数据集（staging 侧）：旧批次里的数据都是 global 那份，升级后必须
+// 保留下来并归到 global，而且 stg_row 的主键要能容纳同一 seq 的三份数据。
+func TestMigrationMovesStagedRowsToGlobal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clear.db")
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	downgradeStagingToV3(t, st)
+	if _, err := st.db.Exec(`INSERT INTO batch(id, created_at, action, status, week_code, week_start, week_codes, index_names)
+		VALUES(1,'2026-09-21 00:00:00','import','staging','2639','2026-09-21','["2639"]','["P5"]')`); err != nil {
+		t.Fatalf("seed batch: %v", err)
+	}
+	if _, err := st.db.Exec(`UPDATE batch SET file_total=1, file_ok=1, row_total=1, row_kept=1 WHERE id=1`); err != nil {
+		t.Fatalf("seed counters: %v", err)
+	}
+	if _, err := st.db.Exec(`INSERT INTO batch_file(batch_id, path, name, status, rows_total, rows_kept, week_code)
+		VALUES(1,'/x/a.xlsm','a.xlsm','ok',1,1,'2639')`); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if _, err := st.db.Exec(`INSERT INTO stg_row(batch_id, seq, file_name, weeks, style_ids, c9)
+		VALUES(1, 0, 'a.xlsm', '["1","2"]', '[]', 'ITEM-1')`); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	if _, err := st.db.Exec(`UPDATE app_meta SET value='3' WHERE key='schema_version'`); err != nil {
+		t.Fatalf("stamp version: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen after upgrade: %v", err)
+	}
+	defer st2.Close()
+	sum, err := st2.LoadStaging()
+	if err != nil {
+		t.Fatalf("load staging: %v", err)
+	}
+	if !sum.HasStaging || sum.RowKept != 1 {
+		t.Fatalf("staging after upgrade = %+v, want the one staged row", sum)
+	}
+	res, err := st2.QueryRows(Query{Source: "", Page: 1, PageSize: 10, SortField: "seq"})
+	if err != nil {
+		t.Fatalf("query staging: %v", err)
+	}
+	if res.Total != 1 || res.Rows[0].Index[8] != "ITEM-1" {
+		t.Fatalf("staged rows after upgrade = %+v", res.Rows)
+	}
+}
+
+// downgradeStagingToV3 turns the staging tables back into their version 3 shape, so
+// a test can replay the upgrade steps a real earlier release would see.
+func downgradeStagingToV3(t *testing.T, st *Store) {
+	t.Helper()
+	for _, stmt := range []string{
+		`DROP TABLE stg_row`,
+		`CREATE TABLE stg_row (
+		   batch_id INTEGER NOT NULL REFERENCES batch(id) ON DELETE CASCADE,
+		   seq INTEGER NOT NULL, file_id INTEGER, file_name TEXT,
+		   src_row INTEGER NOT NULL DEFAULT 0,
+		   c1 TEXT, c2 TEXT, c3 TEXT, c4 TEXT, c5 TEXT,
+		   c6 TEXT, c7 TEXT, c8 TEXT, c9 TEXT, c10 TEXT,
+		   c11 TEXT, c12 TEXT, c13 TEXT, c14 TEXT, c15 TEXT,
+		   weeks TEXT NOT NULL, style_ids TEXT NOT NULL, cf_id INTEGER,
+		   comments TEXT, cf_colors TEXT,
+		   PRIMARY KEY (batch_id, seq))`,
+		`DROP TABLE batch_file`,
+		`CREATE TABLE batch_file (
+		   id INTEGER PRIMARY KEY AUTOINCREMENT,
+		   batch_id INTEGER NOT NULL REFERENCES batch(id) ON DELETE CASCADE,
+		   path TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+		   status TEXT NOT NULL, rows_total INTEGER NOT NULL DEFAULT 0,
+		   rows_kept INTEGER NOT NULL DEFAULT 0, week_code TEXT, err TEXT)`,
+	} {
+		if _, err := st.db.Exec(stmt); err != nil {
+			t.Fatalf("downgrade staging: %v", err)
+		}
+	}
+}

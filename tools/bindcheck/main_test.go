@@ -90,18 +90,23 @@ func TestBoundPayloadFieldNamesArePinned(t *testing.T) {
 		{"AppInfo", view.AppInfo{}, []string{
 			"configPath", "dataDir", "database", "fullName", "goVersion", "name", "platform", "version"}},
 		{"Status", view.Status{}, []string{
-			"archivedRows", "archivedWeeks", "database", "exportMode", "hasStaging", "headerDisplay",
-			"lastAction", "locFilter", "pageSize", "readColumns", "stagedRows", "weekCode", "weekStart"}},
+			"archivedRows", "archivedWeeks", "database", "exportMode", "globalRows", "hasGlobal",
+			"hasLocal", "hasStaging", "headerDisplay", "lastAction", "lastDataset", "locFilter",
+			"localRows", "pageSize", "readColumns", "stagedRows", "weekCode", "weekStart"}},
 		{"CommitResult", view.CommitResult{}, []string{
-			"committedAt", "fileCount", "overwrote", "rowCount", "tableName", "weekCode", "weekStart"}},
+			"committedAt", "fileCount", "globalRows", "localRows", "mergedRows", "overwrote",
+			"rowCount", "tableName", "weekCode", "weekStart"}},
 		{"StagingFilesView", view.NewStagingFilesView(), []string{
 			"batchState", "failedCount", "fileCount", "files", "hasStaging", "rowCount"}},
 		{"ClearStagingResult", view.ClearStagingResult{}, []string{"files", "rows", "weekCode"}},
 		{"ExportResult", view.ExportResult{}, []string{
 			"cfRows", "cols", "comments", "destPath", "dropped", "durationMs", "mode",
-			"preservedVba", "rows", "sizeBytes", "stylesUsed"}},
+			"preservedVba", "rows", "sheets", "sizeBytes", "stylesUsed"}},
 		{"GridQuery", view.GridQuery{}, []string{
-			"filters", "page", "pageSize", "search", "sortDesc", "sortField", "source"}},
+			"dataset", "filters", "page", "pageSize", "search", "sortDesc", "sortField", "source"}},
+		{"ArchiveEntry", store.ArchiveEntry{}, []string{
+			"batchId", "committedAt", "dataset", "fileCount", "indexNames", "rowCount",
+			"tableName", "weekCode", "weekCodes", "weekNo", "weekStart", "year"}},
 		{"GridHeader", view.NewGridHeader(""), []string{
 			"hasStaging", "indexNames", "source", "total", "weekCode", "weekStart", "weeks"}},
 		{"ConfigView", view.ConfigView{}, []string{"config", "path"}},

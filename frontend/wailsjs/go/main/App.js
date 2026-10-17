@@ -18,8 +18,12 @@ export function Commit() {
   return window['go']['main']['App']['Commit']();
 }
 
-export function Export(arg1, arg2) {
-  return window['go']['main']['App']['Export'](arg1, arg2);
+export function Export(arg1, arg2, arg3) {
+  return window['go']['main']['App']['Export'](arg1, arg2, arg3);
+}
+
+export function ExportBundle(arg1) {
+  return window['go']['main']['App']['ExportBundle'](arg1);
 }
 
 export function GetAppInfo() {
@@ -34,8 +38,8 @@ export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
 
-export function GetGridHeader(arg1) {
-  return window['go']['main']['App']['GetGridHeader'](arg1);
+export function GetGridHeader(arg1, arg2) {
+  return window['go']['main']['App']['GetGridHeader'](arg1, arg2);
 }
 
 export function GetLogs(arg1) {
@@ -60,6 +64,10 @@ export function GetYears() {
 
 export function ImportFolder() {
   return window['go']['main']['App']['ImportFolder']();
+}
+
+export function ImportLocalMPS() {
+  return window['go']['main']['App']['ImportLocalMPS']();
 }
 
 export function QueryData(arg1) {

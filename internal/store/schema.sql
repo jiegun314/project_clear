@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS batch_file (
   rows_total INTEGER NOT NULL DEFAULT 0,
   rows_kept  INTEGER NOT NULL DEFAULT 0,
   week_code  TEXT,
-  err        TEXT
+  err        TEXT,
+  -- global | local: the workbook came from a global export or the local sheet.
+  dataset    TEXT    NOT NULL DEFAULT 'global'
 );
 CREATE INDEX IF NOT EXISTS idx_batch_file_batch ON batch_file(batch_id);
 
@@ -85,7 +87,10 @@ CREATE TABLE IF NOT EXISTS stg_row (
   cf_id     INTEGER,
   comments  TEXT,                                -- JSON object col -> text
   cf_colors TEXT,                                -- JSON array, aligned to weeks (条件格式算出的底色)
-  PRIMARY KEY (batch_id, seq)
+  -- global | local | merged: the merged rows are what the grid shows once the
+  -- local sheet has been imported.
+  dataset   TEXT    NOT NULL DEFAULT 'global',
+  PRIMARY KEY (batch_id, dataset, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_stg_row_batch ON stg_row(batch_id, seq);
 
@@ -99,9 +104,12 @@ CREATE TABLE IF NOT EXISTS template (
   created_at  TEXT    NOT NULL
 );
 
--- Registry of committed weeks.
+-- Registry of committed weeks. A week holds three datasets: the global MPS rows,
+-- the local MPS rows, and the merged result, so one week code appears three times
+-- with a dataset each.
 CREATE TABLE IF NOT EXISTS archive (
-  week_code      TEXT PRIMARY KEY,
+  week_code      TEXT NOT NULL,
+  dataset        TEXT NOT NULL DEFAULT 'merged',
   week_start     TEXT    NOT NULL,
   week_codes     TEXT    NOT NULL,
   index_names    TEXT    NOT NULL,
@@ -111,5 +119,6 @@ CREATE TABLE IF NOT EXISTS archive (
   committed_at   TEXT    NOT NULL,
   template_id    INTEGER,
   param_snapshot TEXT,
-  table_name     TEXT    NOT NULL
+  table_name     TEXT    NOT NULL,
+  PRIMARY KEY (week_code, dataset)
 );

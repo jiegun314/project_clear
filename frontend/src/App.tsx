@@ -45,10 +45,13 @@ export default function App() {
       <Toolbar
         busy={tasks.busy}
         hasStaging={Boolean(backend.status?.hasStaging)}
+        hasGlobal={Boolean(backend.status?.hasGlobal)}
+        hasLocal={Boolean(backend.status?.hasLocal)}
         hasArchive={(backend.status?.archivedWeeks ?? 0) > 0}
         stagedFiles={backend.stagedFiles}
         onImport={() => void actions.runImport('import')}
         onAdd={() => void actions.runImport('add')}
+        onImportLocal={() => void actions.runImportLocal()}
         onCommit={() => void actions.runCommit()}
         onClear={actions.runClear}
         onExport={() => void actions.runToolbarExport()}
@@ -79,9 +82,13 @@ export default function App() {
         <div style={{ flex: '1 1 62%', minHeight: TOP_MIN_HEIGHT, display: 'flex', flexDirection: 'column' }}>
           {/* Where the data came from and whether it has been integrated: the
               table itself only answers "what are the numbers". */}
-          <DataStatusStrip state={actions.dataState} />
+          <DataStatusStrip
+            state={actions.dataState}
+            onSelectDataset={actions.selectStagingDataset}
+          />
           <DataGrid
             source={actions.gridSource}
+            dataset={actions.gridDataset}
             headerDisplay={backend.cfg.headerDisplay}
             pageSize={backend.cfg.pageSize}
             reloadToken={backend.reloadToken}
@@ -163,9 +170,12 @@ export default function App() {
       <AboutDialog open={actions.aboutOpen} onClose={actions.closeAbout} />
       <HistoryView
         weekCode={actions.historyWeek}
+        dataset={actions.historyDataset}
         onClose={actions.closeHistory}
         onExported={(m) => tasks.setNotice({ type: 'success', text: m })}
-        onExport={(mode) => actions.runExport(actions.historyWeek ?? undefined, mode)}
+        onExport={(mode) =>
+          actions.runExport(actions.historyWeek ?? undefined, mode, actions.historyDataset)
+        }
         onReady={actions.historyReady}
       />
       {actions.historyLoading && (

@@ -13,15 +13,18 @@ export interface DataGridProps {
   pageSize: number;
   /** Bumped by the parent after an import or commit to force a reload. */
   reloadToken: number;
+  /** Which of a week's three datasets to read; ignored for the staging area. */
+  dataset?: string;
   /** The list's name: 数据清单 plus the state suffix, worded by the shell. */
   title: string;
   /** Shown when there are no rows; the shell words it from the data state. */
   emptyText?: string;
 }
 
-export function DataGrid({ source, headerDisplay, pageSize, reloadToken, title, emptyText }: DataGridProps) {
+export function DataGrid({ source, dataset, headerDisplay, pageSize, reloadToken, title, emptyText }: DataGridProps) {
   const q = useTableQuery({
     source,
+    dataset,
     defaultPageSize: pageSize,
     reloadToken,
     // Leaving the previous week's rows under a new week's header would be a lie.

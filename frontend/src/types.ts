@@ -42,6 +42,8 @@ export interface GridResult {
 
 export interface GridQuery {
   source: string;
+  /** Which of a week's three datasets: global, local or merged ("" = merged). */
+  dataset: string;
   page: number;
   pageSize: number;
   search: string;
@@ -76,6 +78,8 @@ export interface ImportResult {
   durationMs: number;
   /** Staged files whose data this action replaced (matched by file name). */
   replaced?: string[];
+  /** 本地 MPS import: how many rows the local file brought in. */
+  localRows: number;
 }
 
 /** One workbook of the current 整合清单. */
@@ -109,6 +113,10 @@ export interface CommitResult {
   fileCount: number;
   committedAt: string;
   overwrote: boolean;
+  /** The three datasets 整合 wrote, for the summary. */
+  mergedRows: number;
+  globalRows: number;
+  localRows: number;
 }
 
 export interface ClearResult {
@@ -130,6 +138,8 @@ export interface ExportResult {
   sizeBytes: number;
   preservedVba: boolean;
   durationMs: number;
+  /** 1 for the single-sheet report, 3 for the MPS/Local/Global bundle. */
+  sheets: number;
 }
 
 export interface ArchiveEntry {
@@ -144,6 +154,8 @@ export interface ArchiveEntry {
   batchId: number;
   committedAt: string;
   tableName: string;
+  /** global, local or merged — one week holds one entry per dataset. */
+  dataset: string;
 }
 
 export interface AppConfig {
@@ -184,6 +196,13 @@ export interface Status {
   exportMode: string;
   database: string;
   lastAction: string;
+  /** Which of the two inputs the workbench (or the newest week) holds. */
+  hasGlobal: boolean;
+  hasLocal: boolean;
+  globalRows: number;
+  localRows: number;
+  /** The side imported most recently; the grid reopens there. */
+  lastDataset: string;
 }
 
 export interface AppInfo {

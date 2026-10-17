@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"project_clear/internal/service"
+	"project_clear/internal/store"
 	"project_clear/internal/view"
 
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -63,6 +65,32 @@ func (a *App) AddFiles() (out *service.ImportResult, err error) {
 	return res, nil
 }
 
+// ImportLocalMPS asks for one 本地 MPS workbook, checks its layout and merges it
+// into the staged global rows. A file that is not the local layout is refused
+// with the sheet, row and column that do not match.
+func (a *App) ImportLocalMPS() (out *service.ImportResult, err error) {
+	defer a.recoverFault("ImportLocalMPS", &err)
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	paths, err := selectPaths("选择本地 MPS 文件（Month End）", a.lastDir(), false, true,
+		[]string{"xlsx", "xlsm"})
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	a.rememberDir(filepath.Dir(paths[0]))
+	res, err := a.svc.ImportLocal(paths[0], a.progress)
+	if err != nil {
+		wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": false, "message": err.Error()})
+		return nil, err
+	}
+	wr.EventsEmit(a.ctx, "task:done", map[string]any{"ok": true})
+	return res, nil
+}
+
 // ---------------------------------------------------------------- commit
 
 // Commit promotes the staged data into its permanent weekly table.
@@ -71,15 +99,27 @@ func (a *App) Commit() (out *view.CommitResult, err error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	entry, overwrote, err := a.svc.Commit()
+	entries, overwrote, err := a.svc.CommitEntries()
 	if err != nil {
 		return nil, err
 	}
-	return &view.CommitResult{
-		WeekCode: entry.WeekCode, WeekStart: entry.WeekStart, TableName: entry.TableName,
-		RowCount: entry.RowCount, FileCount: entry.FileCount, CommittedAt: entry.CommittedAt,
-		Overwrote: overwrote,
-	}, nil
+	res := &view.CommitResult{Overwrote: overwrote}
+	for _, e := range entries {
+		switch e.Dataset {
+		case store.DatasetMerged:
+			res.WeekCode, res.WeekStart, res.TableName = e.WeekCode, e.WeekStart, e.TableName
+			res.RowCount, res.CommittedAt = e.RowCount, e.CommittedAt
+			res.MergedRows, res.FileCount = e.RowCount, e.FileCount
+		case store.DatasetGlobal:
+			res.GlobalRows = e.RowCount
+		case store.DatasetLocal:
+			res.LocalRows = e.RowCount
+		}
+	}
+	if res.WeekCode == "" {
+		return nil, fmt.Errorf("整合没有生成整合结果")
+	}
+	return res, nil
 }
 
 // ------------------------------------------------------- staging file list
@@ -93,7 +133,7 @@ func (a *App) GetStagingFiles() (out *view.StagingFilesView, err error) {
 		return nil, err
 	}
 	out = view.NewStagingFilesView()
-	files, _, state, err := a.svc.BatchFiles()
+	files, weekCode, state, err := a.svc.BatchFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +149,15 @@ func (a *App) GetStagingFiles() (out *view.StagingFilesView, err error) {
 			out.RowCount += f.RowsKept
 		} else {
 			out.Failed++
+		}
+	}
+	// While the workbench is open the file list's row total is the sum of the
+	// workbooks' own rows: the two sides have not been merged yet, so there is no
+	// single table to count. After 整合 the list is the record of the batch and the
+	// merged week's row count is the meaningful total.
+	if sum, err := a.svc.StagingSummary(); err == nil && !sum.HasStaging {
+		if entry, err := a.svc.ArchiveEntry(weekCode); err == nil && entry != nil {
+			out.RowCount = entry.RowCount
 		}
 	}
 	return out, nil

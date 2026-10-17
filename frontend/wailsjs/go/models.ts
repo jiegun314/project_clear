@@ -136,6 +136,7 @@ export namespace service {
 	    warnings: string[];
 	    durationMs: number;
 	    replaced?: string[];
+	    localRows: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ImportResult(source);
@@ -156,6 +157,7 @@ export namespace service {
 	        this.warnings = source["warnings"];
 	        this.durationMs = source["durationMs"];
 	        this.replaced = source["replaced"];
+	        this.localRows = source["localRows"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -193,6 +195,7 @@ export namespace store {
 	    batchId: number;
 	    committedAt: string;
 	    tableName: string;
+	    dataset: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ArchiveEntry(source);
@@ -211,6 +214,7 @@ export namespace store {
 	        this.batchId = source["batchId"];
 	        this.committedAt = source["committedAt"];
 	        this.tableName = source["tableName"];
+	        this.dataset = source["dataset"];
 	    }
 	}
 	export class CellMeta {
@@ -387,6 +391,9 @@ export namespace view {
 	    fileCount: number;
 	    committedAt: string;
 	    overwrote: boolean;
+	    mergedRows: number;
+	    globalRows: number;
+	    localRows: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CommitResult(source);
@@ -401,6 +408,9 @@ export namespace view {
 	        this.fileCount = source["fileCount"];
 	        this.committedAt = source["committedAt"];
 	        this.overwrote = source["overwrote"];
+	        this.mergedRows = source["mergedRows"];
+	        this.globalRows = source["globalRows"];
+	        this.localRows = source["localRows"];
 	    }
 	}
 	export class ConfigView {
@@ -447,6 +457,7 @@ export namespace view {
 	    sizeBytes: number;
 	    preservedVba: boolean;
 	    durationMs: number;
+	    sheets: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExportResult(source);
@@ -465,6 +476,7 @@ export namespace view {
 	        this.sizeBytes = source["sizeBytes"];
 	        this.preservedVba = source["preservedVba"];
 	        this.durationMs = source["durationMs"];
+	        this.sheets = source["sheets"];
 	    }
 	}
 	export class GridHeader {
@@ -511,6 +523,7 @@ export namespace view {
 	}
 	export class GridQuery {
 	    source: string;
+	    dataset: string;
 	    page: number;
 	    pageSize: number;
 	    search: string;
@@ -525,6 +538,7 @@ export namespace view {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.source = source["source"];
+	        this.dataset = source["dataset"];
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	        this.search = source["search"];
@@ -587,6 +601,11 @@ export namespace view {
 	    exportMode: string;
 	    database: string;
 	    lastAction: string;
+	    hasGlobal: boolean;
+	    hasLocal: boolean;
+	    globalRows: number;
+	    localRows: number;
+	    lastDataset: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
@@ -607,6 +626,11 @@ export namespace view {
 	        this.exportMode = source["exportMode"];
 	        this.database = source["database"];
 	        this.lastAction = source["lastAction"];
+	        this.hasGlobal = source["hasGlobal"];
+	        this.hasLocal = source["hasLocal"];
+	        this.globalRows = source["globalRows"];
+	        this.localRows = source["localRows"];
+	        this.lastDataset = source["lastDataset"];
 	    }
 	}
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { ImportResultModal } from './ImportResultModal';
 import { JNJ } from '../theme/jnj';
 import type { FileResult, ImportResult } from '../types';
@@ -33,6 +33,7 @@ const RESULT: ImportResult = {
   durationMs: 120,
   files: [file('good.xlsm', 'ok'), file('bad.xlsm', 'failed')],
   warnings: [],
+  localRows: 0,
 };
 
 /**
@@ -83,5 +84,22 @@ describe('ImportResultModal', () => {
     expect(chip.style.margin).toBe('0px');
     expect(cell.style.textAlign).toBe('center');
     expect(cell.style.verticalAlign).toBe('middle');
+  });
+
+  it('reports a 本地 MPS import with the merged total and the local contribution', () => {
+    const local: ImportResult = {
+      ...RESULT,
+      action: 'local',
+      total: 1,
+      ok: 1,
+      failed: 0,
+      rowsKept: 1736,
+      localRows: 1736,
+    };
+    render(<ImportResultModal open result={local} onClose={() => {}} />);
+
+    expect(screen.getByText('本地 MPS 导入完成')).toBeTruthy();
+    expect(screen.getByText('导入行数')).toBeTruthy();
+    expect(screen.getByText('1,736')).toBeTruthy();
   });
 });

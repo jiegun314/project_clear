@@ -185,6 +185,50 @@ func writeSyntheticSource(t *testing.T, dir string) string {
 	return path
 }
 
+// writeSyntheticLocal builds the 本地 MPS workbook the run merges in: the local
+// layout, two items the global data already has and one it does not.
+func writeSyntheticLocal(t *testing.T, dir string) string {
+	t.Helper()
+	f := excelize.NewFile()
+	defer f.Close()
+	if err := f.SetSheetName("Sheet1", mps.LocalSheetName); err != nil {
+		t.Fatalf("rename sheet: %v", err)
+	}
+	for i, name := range mps.LocalHeader {
+		if err := f.SetCellStr(mps.LocalSheetName, mps.CellRef(i+1, 1), name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	weeks := []string{"2639", "2640"}
+	for i, code := range weeks {
+		if err := f.SetCellStr(mps.LocalSheetName, mps.CellRef(mps.LocalFirstWeekCol+i, 1), code); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := [][]string{
+		{"P5", "P4", "P3", "P2", "P1", "GROUP A", "CLASS 1", "DESCR A", "ITEM-0001", "B1", "S1", "US-1", "EU-1", "WH_CNB", "0", "10", "AdjDmd"},
+		{"P5", "P4", "P3", "P2", "P1", "GROUP B", "CLASS 2", "DESCR C", "ITEM-0003", "B3", "S3", "US-3", "EU-3", "WH_CNB", "0", "20", "AdjDmd"},
+		{"P5", "P4", "P3", "P2", "P1", "GROUP L", "CLASS L", "DESCR L", "ITEM-9001", "B9", "S9", "US-9", "EU-9", "WH_CNB", "0", "30", "AdjDmd"},
+	}
+	for i, row := range rows {
+		for c, v := range row {
+			if err := f.SetCellStr(mps.LocalSheetName, mps.CellRef(c+1, mps.LocalDataRow+i), v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for w := range weeks {
+			if err := f.SetCellValue(mps.LocalSheetName, mps.CellRef(mps.LocalFirstWeekCol+w, mps.LocalDataRow+i), float64(400+i*10+w)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	path := filepath.Join(dir, "BW_CN_MPS Week39 2026 (Month End).xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("save local: %v", err)
+	}
+	return path
+}
+
 // TestAcceptanceRunOnASyntheticWorkbook runs the whole acceptance path — import,
 // integrate, export, and every fidelity audit — over the small workbook above,
 // in both export modes.
@@ -196,10 +240,12 @@ func TestAcceptanceRunOnASyntheticWorkbook(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			in := t.TempDir()
 			writeSyntheticSource(t, in)
+			local := writeSyntheticLocal(t, t.TempDir())
 
 			var report bytes.Buffer
 			err := Run(Options{
 				In:     in,
+				Local:  local,
 				Out:    t.TempDir(),
 				Clean:  mode.clean,
 				Report: &report,

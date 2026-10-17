@@ -81,7 +81,7 @@ func TestClearStagingKeepsCommittedWeeks(t *testing.T) {
 	}
 
 	// The integrated week is whole: archive entry, weekly table and template.
-	entry, err := st.ArchiveEntryFor("2639")
+	entry, err := st.ArchiveEntryFor("2639", DatasetMerged)
 	if err != nil || entry == nil {
 		t.Fatalf("committed week lost: %+v %v", entry, err)
 	}
@@ -289,7 +289,7 @@ func TestCurrentBatchFilesKeepsTheRecordAfterCommit(t *testing.T) {
 	if len(files) != 0 || state != "" {
 		t.Fatalf("清空后列表 = %+v / %s, want empty", files, state)
 	}
-	entry, err := st.ArchiveEntryFor("2639")
+	entry, err := st.ArchiveEntryFor("2639", DatasetMerged)
 	if err != nil || entry == nil {
 		t.Fatalf("清空后已整合的周丢了: %+v %v", entry, err)
 	}

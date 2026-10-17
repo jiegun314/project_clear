@@ -39,6 +39,16 @@ type Status struct {
 	ExportMode    string `json:"exportMode"`
 	Database      string `json:"database"`
 	LastAction    string `json:"lastAction"`
+	// HasGlobal / HasLocal say which of the two inputs the workbench holds (or,
+	// after 整合, which the newest week holds). The grid shows one at a time and
+	// the toolbar's 整合 waits for both.
+	HasGlobal bool `json:"hasGlobal"`
+	HasLocal  bool `json:"hasLocal"`
+	// GlobalRows / LocalRows are the row counts of the two inputs; LastDataset is
+	// the side whose import ran most recently, so the grid can reopen there.
+	GlobalRows  int    `json:"globalRows"`
+	LocalRows   int    `json:"localRows"`
+	LastDataset string `json:"lastDataset"`
 }
 
 // CommitResult reports the outcome of 整合.
@@ -50,6 +60,11 @@ type CommitResult struct {
 	FileCount   int    `json:"fileCount"`
 	CommittedAt string `json:"committedAt"`
 	Overwrote   bool   `json:"overwrote"`
+	// The three datasets 整合 wrote, so the summary reports what went into the
+	// database rather than only the merged row count.
+	MergedRows int `json:"mergedRows"`
+	GlobalRows int `json:"globalRows"`
+	LocalRows  int `json:"localRows"`
 }
 
 // StagingFilesView backs the toolbar's 已导入文件 button: which workbooks are in
@@ -88,12 +103,19 @@ type ExportResult struct {
 	SizeBytes    int64  `json:"sizeBytes"`
 	PreservedVBA bool   `json:"preservedVba"`
 	DurationMS   int64  `json:"durationMs"`
+	// Sheets is 1 for the single-sheet report and 3 for the MPS/Local/Global
+	// bundle, so the notice can say which kind of file was written.
+	Sheets int `json:"sheets"`
 }
 
 // GridQuery is the data-grid request.
 type GridQuery struct {
 	// Source is "" for the staging area or a week code such as "2639".
-	Source    string            `json:"source"`
+	Source string `json:"source"`
+	// Dataset picks which of a week's three datasets to read: global, local or
+	// merged. Empty means the merged result, which is what the grid showed before
+	// the datasets existed.
+	Dataset   string            `json:"dataset"`
 	Page      int               `json:"page"`
 	PageSize  int               `json:"pageSize"`
 	Search    string            `json:"search"`

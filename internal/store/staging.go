@@ -45,10 +45,15 @@ type StagedRow struct {
 
 // StagingInput is everything one import or add action produces.
 type StagingInput struct {
-	Action      string
-	WeekCode    string
-	WeekStart   string
-	WeekCodes   []string
+	Action    string
+	WeekCode  string
+	WeekStart string
+	WeekCodes []string
+	// Dataset says which of the week's three datasets these rows are: global for
+	// 导入/添加, local for the 本地 MPS file, merged for the result of joining the
+	// two. Empty means global, which is what a batch held before the local file
+	// could be imported.
+	Dataset     string
 	IndexNames  []string
 	Files       []StagedFile
 	Rows        []StagedRow
@@ -77,6 +82,7 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 	if _, err := mustWeek(in.WeekCode); err != nil {
 		return nil, err
 	}
+	dataset := datasetOrGlobal(in.Dataset)
 	weekCodes, err := json.Marshal(in.WeekCodes)
 	if err != nil {
 		return nil, err
@@ -119,11 +125,11 @@ func (s *Store) SaveStaging(in StagingInput) (*StagingResult, error) {
 		return nil, err
 	}
 
-	fileIDs, err := insertBatchFilesTx(tx, batchID, in.Files)
+	fileIDs, err := insertBatchFilesTx(tx, batchID, in.Files, dataset)
 	if err != nil {
 		return nil, err
 	}
-	if err := writeStagingRowsTx(tx, batchID, 0, in.Rows, styleMap, fileIDs); err != nil {
+	if err := writeStagingRowsTx(tx, batchID, 0, dataset, in.Rows, styleMap, fileIDs); err != nil {
 		return nil, err
 	}
 
@@ -226,13 +232,13 @@ func insertBatchTx(tx *sql.Tx, in StagingInput, weekCodes, indexNames []byte) (i
 // insertBatchFilesTx writes the per-file records and returns path -> file id.
 // The id is how a staging row is tied back to the workbook it came from, which
 // is what makes "添加同一个文件 = 覆盖它原来的数据" possible.
-func insertBatchFilesTx(tx *sql.Tx, batchID int64, files []StagedFile) (map[string]int64, error) {
+func insertBatchFilesTx(tx *sql.Tx, batchID int64, files []StagedFile, dataset string) (map[string]int64, error) {
 	ids := make(map[string]int64, len(files))
 	for _, f := range files {
 		res, err := tx.Exec(
-			`INSERT INTO batch_file(batch_id, path, name, size, status, rows_total, rows_kept, week_code, err)
-			 VALUES(?,?,?,?,?,?,?,?,?)`,
-			batchID, f.Path, f.Name, f.Size, f.Status, f.RowsTotal, f.RowsKept, f.WeekCode, f.Err)
+			`INSERT INTO batch_file(batch_id, path, name, size, status, rows_total, rows_kept, week_code, err, dataset)
+			 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			batchID, f.Path, f.Name, f.Size, f.Status, f.RowsTotal, f.RowsKept, f.WeekCode, f.Err, dataset)
 		if err != nil {
 			return nil, err
 		}
@@ -245,10 +251,10 @@ func insertBatchFilesTx(tx *sql.Tx, batchID int64, files []StagedFile) (map[stri
 
 // writeStagingRowsTx appends rows to a batch, numbering them from base so a
 // merge continues the existing sequence instead of restarting it.
-func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, styleMap map[int]int, fileIDs map[string]int64) error {
+func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, dataset string, rows []StagedRow, styleMap map[int]int, fileIDs map[string]int64) error {
 	// The column list and the placeholder list are built together so the two
 	// can never drift apart.
-	stgCols := []string{"batch_id", "seq", "file_id", "file_name", "src_row"}
+	stgCols := []string{"batch_id", "dataset", "seq", "file_id", "file_name", "src_row"}
 	for i := 1; i <= mps.IndexCols; i++ {
 		stgCols = append(stgCols, fmt.Sprintf("c%d", i))
 	}
@@ -288,7 +294,9 @@ func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, s
 		for j, id := range r.StyleIDs {
 			mapped, ok := styleMap[id]
 			if !ok {
-				mapped = 0
+				// Pass unknown ids through: the merged dataset carries the ids the
+				// database already assigned to the global rows, not dictionary ids.
+				mapped = id
 			}
 			styleIDs[j] = mapped
 		}
@@ -338,7 +346,7 @@ func writeStagingRowsTx(tx *sql.Tx, batchID int64, base int, rows []StagedRow, s
 		}
 
 		rowArgs := make([]any, 0, len(stgCols))
-		rowArgs = append(rowArgs, batchID, base+i, fileID, r.FileName, r.SourceRow)
+		rowArgs = append(rowArgs, batchID, dataset, base+i, fileID, r.FileName, r.SourceRow)
 		for _, v := range r.Index {
 			rowArgs = append(rowArgs, v)
 		}
@@ -416,6 +424,7 @@ func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult,
 	if _, err := mustWeek(in.WeekCode); err != nil {
 		return nil, err
 	}
+	dataset := datasetOrGlobal(in.Dataset)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -431,20 +440,20 @@ func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult,
 			replaced = append(replaced, name)
 		}
 		list := strings.Join(ph, ",")
-		args := append([]any{sum.BatchID, sum.BatchID}, replaced...)
+		args := append([]any{sum.BatchID, dataset, sum.BatchID, dataset}, replaced...)
 		if _, err := tx.Exec(fmt.Sprintf(
-			`DELETE FROM stg_row WHERE batch_id=? AND file_id IN
-			   (SELECT id FROM batch_file WHERE batch_id=? AND name IN (%s))`, list), args...); err != nil {
+			`DELETE FROM stg_row WHERE batch_id=? AND dataset=? AND file_id IN
+			   (SELECT id FROM batch_file WHERE batch_id=? AND dataset=? AND name IN (%s))`, list), args...); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(fmt.Sprintf(
-			`DELETE FROM stg_row WHERE batch_id=? AND file_id IS NULL AND file_name IN (%s)`, list),
-			append([]any{sum.BatchID}, replaced...)...); err != nil {
+			`DELETE FROM stg_row WHERE batch_id=? AND dataset=? AND file_id IS NULL AND file_name IN (%s)`, list),
+			append([]any{sum.BatchID, dataset}, replaced...)...); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(fmt.Sprintf(
-			`DELETE FROM batch_file WHERE batch_id=? AND name IN (%s)`, list),
-			append([]any{sum.BatchID}, replaced...)...); err != nil {
+			`DELETE FROM batch_file WHERE batch_id=? AND dataset=? AND name IN (%s)`, list),
+			append([]any{sum.BatchID, dataset}, replaced...)...); err != nil {
 			return nil, err
 		}
 	}
@@ -456,16 +465,16 @@ func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult,
 	if _, err := resolveDxfIDsTx(tx, in.Dxf); err != nil {
 		return nil, err
 	}
-	fileIDs, err := insertBatchFilesTx(tx, sum.BatchID, in.Files)
+	fileIDs, err := insertBatchFilesTx(tx, sum.BatchID, in.Files, dataset)
 	if err != nil {
 		return nil, err
 	}
 	var base int
 	if err := tx.QueryRow(
-		`SELECT COALESCE(MAX(seq),-1)+1 FROM stg_row WHERE batch_id=?`, sum.BatchID).Scan(&base); err != nil {
+		`SELECT COALESCE(MAX(seq),-1)+1 FROM stg_row WHERE batch_id=? AND dataset=?`, sum.BatchID, dataset).Scan(&base); err != nil {
 		return nil, err
 	}
-	if err := writeStagingRowsTx(tx, sum.BatchID, base, in.Rows, styleMap, fileIDs); err != nil {
+	if err := writeStagingRowsTx(tx, sum.BatchID, base, dataset, in.Rows, styleMap, fileIDs); err != nil {
 		return nil, err
 	}
 	if err := refreshBatchTotalsTx(tx, sum.BatchID); err != nil {
@@ -491,6 +500,257 @@ func (s *Store) MergeStaging(in StagingInput, replace []string) (*StagingResult,
 func hashOf(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
+}
+
+// datasetOrGlobal maps an empty dataset onto global: a batch written before the
+// local sheet existed holds the global rows.
+func datasetOrGlobal(dataset string) string {
+	d := strings.ToLower(strings.TrimSpace(dataset))
+	if d == "" {
+		return DatasetGlobal
+	}
+	return d
+}
+
+// DatasetInput replaces one dataset of an existing staging batch. Used when the
+// 本地 MPS file is imported: its own rows and the merged result are written into
+// the batch the global import already opened.
+type DatasetInput struct {
+	Dataset string
+	Files   []StagedFile
+	Rows    []StagedRow
+}
+
+// ReplaceStagingDatasets swaps the given datasets' rows and file records in
+// place, in one transaction: importing the 本地 MPS file writes its own rows and
+// the merged result together, and a half-written pair would leave the batch
+// claiming a merge that is not there. The week columns of the batch are
+// untouched, so every dataset keeps sharing one column layout — the merged rows
+// are aligned to the global weeks by the caller.
+func (s *Store) ReplaceStagingDatasets(batchID int64, inputs ...DatasetInput) error {
+	sets := make([]string, len(inputs))
+	for i, in := range inputs {
+		raw := strings.ToLower(strings.TrimSpace(in.Dataset))
+		set, err := normaliseDataset(raw)
+		if err != nil {
+			return err
+		}
+		if raw == "" {
+			return fmt.Errorf("写入数据集时必须指明 global、local 或 merged")
+		}
+		sets[i] = set
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for i, in := range inputs {
+		set := sets[i]
+		if _, err := tx.Exec(`DELETE FROM stg_row WHERE batch_id=? AND dataset=?`, batchID, set); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM batch_file WHERE batch_id=? AND dataset=?`, batchID, set); err != nil {
+			return err
+		}
+		fileIDs, err := insertBatchFilesTx(tx, batchID, in.Files, set)
+		if err != nil {
+			return err
+		}
+		// The merged rows already carry database style ids: writeStagingRowsTx
+		// passes ids it cannot map through untouched.
+		if err := writeStagingRowsTx(tx, batchID, 0, set, in.Rows, nil, fileIDs); err != nil {
+			return err
+		}
+	}
+	if err := refreshBatchTotalsTx(tx, batchID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// StagingHeader is the column frame of a staging batch: which week is its name
+// and which week columns every dataset in the batch is aligned to.
+type StagingHeader struct {
+	WeekCode   string
+	WeekStart  string
+	WeekCodes  []string
+	IndexNames []string
+}
+
+// GlobalBatchInput replaces the global side of an existing staging batch and
+// adopts the header the new global files define.
+type GlobalBatchInput struct {
+	Header StagingHeader
+	Files  []StagedFile
+	Rows   []StagedRow
+	Dict   *mps.StyleDict
+	Dxf    *mps.DxfDict
+	// LocalRows, when non-nil, replaces the local rows too. They are already
+	// re-indexed onto Header.WeekCodes; the local workbook records are kept.
+	LocalRows []StagedRow
+	// TemplateSrc/TemplateNam record the workbook the export template is taken
+	// from, exactly as StagingInput does for a fresh batch.
+	TemplateSrc string
+	TemplateNam string
+}
+
+// ReplaceGlobalInBatch swaps the global dataset of a workbench and updates the
+// batch's week columns in one transaction, together with the local rows
+// re-indexed onto them. Doing the three writes together is what lets a global
+// file arrive after the local one without either side being left on the old
+// column frame.
+func (s *Store) ReplaceGlobalInBatch(batchID int64, in GlobalBatchInput) error {
+	if _, err := mustWeek(in.Header.WeekCode); err != nil {
+		return err
+	}
+	weekCodes, err := json.Marshal(in.Header.WeekCodes)
+	if err != nil {
+		return err
+	}
+	indexNames, err := json.Marshal(in.Header.IndexNames)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`UPDATE batch SET week_code=?, week_start=?, week_codes=?, index_names=? WHERE id=?`,
+		in.Header.WeekCode, in.Header.WeekStart, string(weekCodes), string(indexNames), batchID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM stg_row WHERE batch_id=? AND dataset=?`, batchID, DatasetGlobal); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM batch_file WHERE batch_id=? AND dataset=?`, batchID, DatasetGlobal); err != nil {
+		return err
+	}
+	styleMap, err := resolveStyleIDsTx(tx, in.Dict)
+	if err != nil {
+		return err
+	}
+	if _, err := resolveDxfIDsTx(tx, in.Dxf); err != nil {
+		return err
+	}
+	fileIDs, err := insertBatchFilesTx(tx, batchID, in.Files, DatasetGlobal)
+	if err != nil {
+		return err
+	}
+	if err := writeStagingRowsTx(tx, batchID, 0, DatasetGlobal, in.Rows, styleMap, fileIDs); err != nil {
+		return err
+	}
+	if in.LocalRows != nil {
+		if _, err := tx.Exec(`DELETE FROM stg_row WHERE batch_id=? AND dataset=?`, batchID, DatasetLocal); err != nil {
+			return err
+		}
+		// The local rows carry no styles: ids that are already database ids pass
+		// through the nil map untouched.
+		if err := writeStagingRowsTx(tx, batchID, 0, DatasetLocal, in.LocalRows, nil, nil); err != nil {
+			return err
+		}
+	}
+	// The first global import of a local-first workbench is also where the export
+	// template appears; without recording it here the archive row would point at
+	// no template.
+	if in.TemplateSrc != "" {
+		if _, err := storeTemplateTx(tx, batchID, StagingInput{
+			WeekCode:    in.Header.WeekCode,
+			TemplateSrc: in.TemplateSrc,
+			TemplateNam: in.TemplateNam,
+		}); err != nil {
+			return err
+		}
+	}
+	if err := refreshBatchTotalsTx(tx, batchID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DatasetFileName is the name of the (first) workbook recorded for a dataset,
+// used to attribute the rows a merge derives from it.
+func (s *Store) DatasetFileName(batchID int64, dataset string) (string, error) {
+	var name string
+	err := s.db.QueryRow(
+		`SELECT name FROM batch_file WHERE batch_id=? AND dataset=? AND status='ok' ORDER BY id LIMIT 1`,
+		batchID, datasetOrGlobal(dataset)).Scan(&name)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// LoadStagingDataset reads one dataset of a staging batch back in the shape the
+// import produced it, so the local merge can join the staged global rows.
+func (s *Store) LoadStagingDataset(batchID int64, dataset string) ([]StagedRow, error) {
+	set := datasetOrGlobal(dataset)
+
+	// Loaded before the row cursor: the pool allows one connection, so a second
+	// query cannot run while the cursor below is open.
+	cfPatterns, err := s.LoadCFPatterns()
+	if err != nil {
+		return nil, err
+	}
+
+	cols := []string{"seq", "file_name", "src_row"}
+	for i := 1; i <= mps.IndexCols; i++ {
+		cols = append(cols, fmt.Sprintf("c%d", i))
+	}
+	cols = append(cols, "weeks", "style_ids", "cf_id", "comments", "cf_colors")
+
+	rows, err := s.db.Query(fmt.Sprintf(
+		`SELECT %s FROM stg_row WHERE batch_id=? AND dataset=? ORDER BY seq`,
+		strings.Join(cols, ",")), batchID, set)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []StagedRow{}
+	for rows.Next() {
+		var r StagedRow
+		var seq int
+		var weeksJSON, styleJSON string
+		var cfID sql.NullInt64
+		var commentsJSON, cfColorsJSON sql.NullString
+		idx := make([]sql.NullString, mps.IndexCols)
+		scan := []any{&seq, &r.FileName, &r.SourceRow}
+		for i := range idx {
+			scan = append(scan, &idx[i])
+		}
+		scan = append(scan, &weeksJSON, &styleJSON, &cfID, &commentsJSON, &cfColorsJSON)
+		if err := rows.Scan(scan...); err != nil {
+			return nil, err
+		}
+		for i := range idx {
+			r.Index[i] = idx[i].String
+		}
+		s.decodeJSON("周数据", weeksJSON, &r.Weeks)
+		s.decodeJSON("单元格样式", styleJSON, &r.StyleIDs)
+		if commentsJSON.Valid && commentsJSON.String != "" {
+			s.decodeJSON("批注", commentsJSON.String, &r.Comments)
+		}
+		if cfColorsJSON.Valid && cfColorsJSON.String != "" {
+			s.decodeJSON("条件格式底色", cfColorsJSON.String, &r.CFColors)
+		}
+		if cfID.Valid {
+			if payload, ok := cfPatterns[cfID.Int64]; ok {
+				r.CF = mps.UnmarshalRow(payload)
+			}
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 func totalRows(files []StagedFile) int {
@@ -625,6 +885,32 @@ type StagingSummary struct {
 	RowKept    int
 	TemplateID sql.NullInt64
 	HasStaging bool
+	// Datasets lists which of the week's inputs the staging area holds, and
+	// RowsByDataset how many rows each one has. A workbench holds the global rows
+	// and/or the local rows; the merged result is only computed when 整合 runs.
+	Datasets      []string
+	RowsByDataset map[string]int
+	// LastDataset is the dataset whose import ran most recently, which is what
+	// the grid shows until the user switches sides or 整合 replaces it.
+	LastDataset string
+}
+
+// Has reports whether a dataset has been written to the staging area.
+func (s *StagingSummary) Has(dataset string) bool { return s.RowsByDataset[dataset] > 0 }
+
+// Rows is how many rows the given dataset holds.
+func (s *StagingSummary) Rows(dataset string) int { return s.RowsByDataset[dataset] }
+
+// DisplayDataset is what the main grid shows for the staging area: the dataset
+// whose import ran last, so the rows on screen are the ones just brought in.
+func (s *StagingSummary) DisplayDataset() string {
+	if s.LastDataset != "" && s.Has(s.LastDataset) {
+		return s.LastDataset
+	}
+	if s.Has(DatasetLocal) && !s.Has(DatasetGlobal) {
+		return DatasetLocal
+	}
+	return DatasetGlobal
 }
 
 // LoadStaging returns the active staging batch, or HasStaging=false.
@@ -646,6 +932,34 @@ func (s *Store) LoadStaging() (*StagingSummary, error) {
 	out.HasStaging = true
 	s.decodeJSON("周码列表", weekCodes, &out.WeekCodes)
 	s.decodeJSON("索引表头", indexNames, &out.IndexNames)
+	out.Datasets = []string{}
+	out.RowsByDataset = map[string]int{}
+	bySet, err := s.db.Query(
+		`SELECT dataset, COUNT(1) FROM stg_row WHERE batch_id=? GROUP BY dataset ORDER BY dataset`, out.BatchID)
+	if err != nil {
+		return nil, err
+	}
+	defer bySet.Close()
+	for bySet.Next() {
+		var name string
+		var n int
+		if err := bySet.Scan(&name, &n); err != nil {
+			return nil, err
+		}
+		out.Datasets = append(out.Datasets, name)
+		out.RowsByDataset[name] = n
+	}
+	if err := bySet.Err(); err != nil {
+		return nil, err
+	}
+	// The last successful workbook tells which side the user imported most
+	// recently; the grid starts there after a restart.
+	err = s.db.QueryRow(
+		`SELECT dataset FROM batch_file WHERE batch_id=? AND status='ok' ORDER BY id DESC LIMIT 1`,
+		out.BatchID).Scan(&out.LastDataset)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
 	return out, nil
 }
 

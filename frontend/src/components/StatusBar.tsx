@@ -15,8 +15,20 @@ export function StatusBar({
   status: Status | null;
   progress: TaskProgress | null;
 }) {
+  // The workbench holds up to two inputs; name the ones that are there rather
+  // than one combined row count that describes neither side.
+  const stagingParts: string[] = [];
+  if (status?.hasStaging) {
+    if (status.hasGlobal) stagingParts.push(`Global ${status.globalRows.toLocaleString()}`);
+    if (status.hasLocal) stagingParts.push(`Local ${status.localRows.toLocaleString()}`);
+  }
   const items: { label: string; value: string; tip?: string }[] = [
-    { label: '临时数据', value: status?.hasStaging ? `${status.weekCode} · ${status.stagedRows.toLocaleString()} 行` : '无' },
+    {
+      label: '临时数据',
+      value: status?.hasStaging
+        ? `${status.weekCode} · ${stagingParts.length ? stagingParts.join(' / ') : '空'}`
+        : '无',
+    },
     {
       label: '已整合',
       value: `${status?.archivedWeeks ?? 0} 周 · ${(status?.archivedRows ?? 0).toLocaleString()} 行`,

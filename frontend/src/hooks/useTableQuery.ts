@@ -16,6 +16,8 @@ export interface TableQueryOptions {
    * selection like any other.
    */
   source: string | null;
+  /** Which of a week's three datasets to read; ignored for the staging area. */
+  dataset?: string;
   /** The page size the caller starts from, and the one it is reset to when this changes. */
   defaultPageSize: number;
   /** Bumped by the caller to force a reload without changing anything else. */
@@ -62,7 +64,7 @@ export interface TableQuery {
  * above and in how they are laid out, not in how they read data.
  */
 export function useTableQuery(opt: TableQueryOptions): TableQuery {
-  const { source, defaultPageSize, reloadToken = 0, clearRowsOnError = false } = opt;
+  const { source, dataset = '', defaultPageSize, reloadToken = 0, clearRowsOnError = false } = opt;
 
   const [header, setHeader] = useState<GridHeader | null>(null);
   const [rows, setRows] = useState<GridRow[]>([]);
@@ -113,7 +115,7 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
     let alive = true;
     settledFor.current = null;
     api
-      .getGridHeader(source)
+      .getGridHeader(source, dataset)
       .then((h) => {
         if (alive) setHeader(h);
       })
@@ -130,7 +132,7 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
     // reloadToken belongs here as well as in the page reset: after an import the
     // staging area gains its week columns, and the header fetched while it was
     // empty would leave the grid with no columns and no rows to show.
-  }, [source, notifySettled, reloadToken]);
+  }, [source, dataset, notifySettled, reloadToken]);
 
   const load = useCallback(async () => {
     if (source === null || !header) return;
@@ -139,6 +141,7 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
     try {
       const res = await api.queryData({
         source,
+        dataset,
         page,
         pageSize,
         search: debounced,
@@ -163,7 +166,7 @@ export function useTableQuery(opt: TableQueryOptions): TableQuery {
         notifySettled(source);
       }
     }
-  }, [source, header, page, pageSize, debounced, sort, notifySettled, clearRowsOnError]);
+  }, [source, dataset, header, page, pageSize, debounced, sort, notifySettled, clearRowsOnError]);
 
   useEffect(() => {
     // reloadToken is the parent's "look again" signal: the query itself does not

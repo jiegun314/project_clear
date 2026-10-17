@@ -14,7 +14,9 @@ export function ClearStaging():Promise<view.ClearStagingResult>;
 
 export function Commit():Promise<view.CommitResult>;
 
-export function Export(arg1:string,arg2:string):Promise<view.ExportResult>;
+export function Export(arg1:string,arg2:string,arg3:string):Promise<view.ExportResult>;
+
+export function ExportBundle(arg1:string):Promise<view.ExportResult>;
 
 export function GetAppInfo():Promise<view.AppInfo>;
 
@@ -22,7 +24,7 @@ export function GetArchive():Promise<Array<store.ArchiveEntry>>;
 
 export function GetConfig():Promise<view.ConfigView>;
 
-export function GetGridHeader(arg1:string):Promise<view.GridHeader>;
+export function GetGridHeader(arg1:string,arg2:string):Promise<view.GridHeader>;
 
 export function GetLogs(arg1:number):Promise<Array<logging.Entry>>;
 
@@ -35,6 +37,8 @@ export function GetWeeks(arg1:number):Promise<Array<number>>;
 export function GetYears():Promise<Array<number>>;
 
 export function ImportFolder():Promise<service.ImportResult>;
+
+export function ImportLocalMPS():Promise<service.ImportResult>;
 
 export function QueryData(arg1:view.GridQuery):Promise<store.GridResult>;
 

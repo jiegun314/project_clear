@@ -9,6 +9,18 @@ export interface ImportResultModalProps {
   onClose: () => void;
 }
 
+/** The dialog's title, per action: 导入 / 添加 / 导入本地 MPS. */
+function actionTitle(action: string): string {
+  switch (action) {
+    case 'import':
+      return '导入完成';
+    case 'local':
+      return '本地 MPS 导入完成';
+    default:
+      return '添加完成';
+  }
+}
+
 /** After every import or add, the brief asks for a success/failure breakdown. */
 export function ImportResultModal({ open, result, onClose }: ImportResultModalProps) {
   if (!result) return null;
@@ -26,7 +38,7 @@ export function ImportResultModal({ open, result, onClose }: ImportResultModalPr
       title={
         <span style={{ color: tone, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {failed === 0 ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
-          {result.action === 'import' ? '导入完成' : '添加完成'}
+          {actionTitle(result.action)}
           {failed > 0 ? `（${failed} 个文件失败）` : ''}
         </span>
       }
@@ -35,7 +47,9 @@ export function ImportResultModal({ open, result, onClose }: ImportResultModalPr
         <Statistic title="处理文件" value={result.total} />
         <Statistic title="成功" value={result.ok} styles={{ content: { color: JNJ.success } }} />
         <Statistic title="失败" value={result.failed} styles={{ content: { color: failed ? JNJ.danger : undefined } }} />
-        <Statistic title="合并行数" value={result.rowsKept} />
+        {/* The rows this import brought in. No merged total exists until 整合:
+            the two sides are stored independently. */}
+        <Statistic title="导入行数" value={result.rowsKept} />
         <Statistic title="耗时" value={result.durationMs} suffix="ms" />
       </Space>
 

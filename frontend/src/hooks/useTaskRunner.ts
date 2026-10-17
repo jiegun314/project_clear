@@ -52,6 +52,10 @@ export function useTaskRunner(): TaskRunner {
     setBusy(true);
     taskRunning.current = true;
     setProgress({ stage, done, total });
+    // A new action supersedes the previous result: its one-line notice must not
+    // sit above the grid next to the new state, where it reads as if it still
+    // described what is on screen.
+    setNotice(null);
   }, []);
 
   const finish = useCallback((ok: boolean) => {

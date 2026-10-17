@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"project_clear/internal/mps"
@@ -160,5 +161,69 @@ func TestCommitReturnsTheTimeItStored(t *testing.T) {
 	if list[0].CommittedAt != entry.CommittedAt {
 		t.Errorf("归档时间 %q 与返回的 %q 不是同一次读数（共读了 %d 次时钟）",
 			list[0].CommittedAt, entry.CommittedAt, readings)
+	}
+}
+
+// 升级到三份数据集：旧库里每一周只有一份数据，那就是当时的整合结果，升级后必须
+// 归到 merged，并且仍然查得到。
+func TestMigrationMovesExistingWeeksToMerged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clear.db")
+
+	// 先用当前版本建库，再把它降回 v2 的档案表结构，模拟一个旧文件。
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := st.db.Exec(`DROP TABLE archive`); err != nil {
+		t.Fatalf("drop archive: %v", err)
+	}
+	if _, err := st.db.Exec(`CREATE TABLE archive (
+		week_code TEXT PRIMARY KEY, week_start TEXT NOT NULL, week_codes TEXT NOT NULL,
+		index_names TEXT NOT NULL, row_count INTEGER NOT NULL, file_count INTEGER NOT NULL,
+		batch_id INTEGER, committed_at TEXT NOT NULL, template_id INTEGER,
+		param_snapshot TEXT, table_name TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create v2 archive: %v", err)
+	}
+	if _, err := st.db.Exec(`INSERT INTO archive
+		(week_code, week_start, week_codes, index_names, row_count, file_count, committed_at, table_name)
+		VALUES('2639','2026-09-21','["2639"]','["P5"]',1516,13,'2026-10-10 21:06:55','data_2639')`); err != nil {
+		t.Fatalf("seed v2 row: %v", err)
+	}
+	// A real version 2 file has the version 3 staging tables as well, so both
+	// upgrade steps have to be replayable from it.
+	downgradeStagingToV3(t, st)
+	if _, err := st.db.Exec(`UPDATE app_meta SET value='2' WHERE key='schema_version'`); err != nil {
+		t.Fatalf("stamp version: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// 用新版本打开：升级应当把那一份数据归到 merged。
+	st2, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen after upgrade: %v", err)
+	}
+	defer st2.Close()
+	list, err := st2.ListArchive()
+	if err != nil {
+		t.Fatalf("list archive: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("archive rows = %d, want 1: %+v", len(list), list)
+	}
+	if list[0].Dataset != DatasetMerged {
+		t.Errorf("dataset = %q, want %q", list[0].Dataset, DatasetMerged)
+	}
+	if list[0].WeekCode != "2639" || list[0].RowCount != 1516 {
+		t.Errorf("entry = %+v, want the original week and row count", list[0])
+	}
+	// 旧调用方不传数据集，也应当还能读到它。
+	entry, err := st2.ArchiveEntryFor("2639", "")
+	if err != nil {
+		t.Fatalf("ArchiveEntryFor: %v", err)
+	}
+	if entry == nil || entry.TableName != "data_2639" {
+		t.Fatalf("merged entry after upgrade = %+v", entry)
 	}
 }

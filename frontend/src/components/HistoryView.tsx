@@ -6,9 +6,12 @@ import { useTableQuery } from '../hooks/useTableQuery';
 import { buildGridColumns } from '../lib/gridColumns';
 import { GridTable } from './GridTable';
 import type { ExportResult } from '../types';
+import { DatasetTag } from './DatasetTag';
 
 export interface HistoryViewProps {
   weekCode: string | null;
+  /** Which of the week's three datasets this window is showing. */
+  dataset?: string;
   onClose: () => void;
   onExported: (msg: string) => void;
   /**
@@ -23,14 +26,16 @@ export interface HistoryViewProps {
   onReady?: () => void;
 }
 
+/** How the three datasets are named in the window. */
 /**
  * The full table for one committed week. Sorts and filters are done by the
  * backend, but the page size is deliberately larger than the main grid because
  * the brief asks for "all data" here.
  */
-export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }: HistoryViewProps) {
+export function HistoryView({ weekCode, dataset = 'merged', onClose, onExported, onExport, onReady }: HistoryViewProps) {
   const q = useTableQuery({
     source: weekCode,
+    dataset,
     defaultPageSize: 500,
     // 失败时保留原有行：这是这个窗口一直以来的行为。
     clearRowsOnError: false,
@@ -66,6 +71,8 @@ export function HistoryView({ weekCode, onClose, onExported, onExport, onReady }
       title={
         <Space>
           <span style={{ fontWeight: 600 }}>历史数据</span>
+          <span style={{ color: JNJ.textMuted, fontWeight: 400, fontSize: 12 }}>·</span>
+          <DatasetTag dataset={dataset} />
           {q.header?.weekCode && (
             <>
               <Tag style={{ background: JNJ.red, color: '#fff', border: 'none' }}>
