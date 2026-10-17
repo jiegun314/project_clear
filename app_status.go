@@ -90,18 +90,17 @@ func (a *App) GetStatus() (out *view.Status, err error) {
 			st.IntegrationRows = merged.RowCount
 		}
 	}
-	list, err := a.svc.Archive()
+	// The bottom status bar's 已整合 count is integration weeks, not the history
+	// list: history now also contains weeks whose imports are complete but not
+	// integrated yet.
+	integrations, err := a.db.ListIntegrations()
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
-	for _, e := range list {
-		if !seen[e.WeekCode] {
-			seen[e.WeekCode] = true
-			st.ArchivedWeeks++
-		}
-		if e.Dataset == "merged" {
-			st.ArchivedRows += e.RowCount
+	st.ArchivedWeeks = len(integrations)
+	for _, in := range integrations {
+		if merged, err := a.db.Dataset(in.MergedID); err == nil && merged != nil {
+			st.ArchivedRows += merged.RowCount
 		}
 	}
 	if len(a.log.Recent(1)) > 0 {

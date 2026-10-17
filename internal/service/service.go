@@ -839,42 +839,45 @@ type FileWithDataset struct {
 
 // Archive returns the integrated weeks as three dataset entries each.
 func (s *Service) Archive() ([]ArchiveEntry, error) {
-	list, err := s.db.ListIntegrations()
+	// History is every week with a completed dataset, not only integrated weeks:
+	// 完成 Global 导入 and a Local import are already final datasets.
+	weeks, err := s.db.WeeksWithReadyData()
 	if err != nil {
 		return nil, err
 	}
 	out := []ArchiveEntry{}
-	for _, in := range list {
-		global, err := s.db.Current(in.WeekCode, store.DatasetGlobal)
+	for _, week := range weeks {
+		global, err := s.db.Current(week, store.DatasetGlobal)
 		if err != nil {
 			return nil, err
 		}
-		local, err := s.db.Current(in.WeekCode, store.DatasetLocal)
+		local, err := s.db.Current(week, store.DatasetLocal)
 		if err != nil {
 			return nil, err
 		}
-		expired := integrationExpired(in, global, local)
+		integration, err := s.db.Integration(week)
+		if err != nil {
+			return nil, err
+		}
+		expired := integrationExpired(integration, global, local)
 
-		// The merged row is the integration itself, and is the only one that can
-		// be outdated. Global and Local show their *current* versions: after a
-		// new import the Global/Local row moves to the new version and its
-		// creation time, while an expired integration keeps pointing at the old
-		// merged result until 整合 runs again.
+		// The merged row exists only once the week is integrated, and is the only
+		// row that can be outdated. Global and Local show their current versions;
+		// they are there as soon as they are completed.
 		type item struct {
 			kind    string
 			id      int64
 			expired bool
 		}
-		items := []item{{store.DatasetMerged, in.MergedID, expired}}
+		var items []item
+		if integration != nil {
+			items = append(items, item{store.DatasetMerged, integration.MergedID, expired})
+		}
 		if global != nil {
 			items = append(items, item{store.DatasetGlobal, global.ID, false})
-		} else if in.GlobalID.Valid {
-			items = append(items, item{store.DatasetGlobal, in.GlobalID.Int64, false})
 		}
 		if local != nil {
 			items = append(items, item{store.DatasetLocal, local.ID, false})
-		} else if in.LocalID.Valid {
-			items = append(items, item{store.DatasetLocal, in.LocalID.Int64, false})
 		}
 		for _, it := range items {
 			d, err := s.db.Dataset(it.id)
@@ -1006,6 +1009,26 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 	if err != nil {
 		return nil, err
 	}
+	fallbackTemplate := false
+	if templatePath == "" {
+		// A Local-only week has no Global source workbook to use as the template.
+		// A blank workbook is enough for a clean rebuild, but it cannot satisfy
+		// the template engine's header copy, so this path exports clean.
+		fallbackTemplate = true
+		tmp, err := os.CreateTemp("", "clear-template-*.xlsx")
+		if err != nil {
+			return nil, fmt.Errorf("创建导出模板失败: %w", err)
+		}
+		tmpPath := tmp.Name()
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+		if err := mps.WriteBlankTemplate(tmpPath); err != nil {
+			return nil, fmt.Errorf("生成空白导出模板失败: %w", err)
+		}
+		defer os.Remove(tmpPath)
+		templatePath = tmpPath
+		s.log.Warn("导出", "周码 %s 没有 Global 源模板（只有 Local 数据），按纯数据格式导出", entry.WeekCode)
+	}
 	exportRows := make([]mps.ExportRow, 0, len(rows))
 	for _, r := range rows {
 		exportRows = append(exportRows, mps.ExportRow{
@@ -1016,6 +1039,7 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 	if progress != nil {
 		progress("写入文件", 1, 2)
 	}
+	effectiveClean := clean || fallbackTemplate
 	exportStart := time.Now()
 	stats, err := mps.Export(mps.ExportInput{
 		TemplatePath: templatePath,
@@ -1026,7 +1050,7 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 		StyleByID:    styles,
 		DxfStyles:    dxfStyles,
 		DxfIndex:     dxfIndex,
-		Clean:        clean,
+		Clean:        effectiveClean,
 	})
 	if err != nil {
 		s.log.Error("导出", "失败: %v", err)
@@ -1037,7 +1061,7 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 		progress("完成", 2, 2)
 	}
 	label := "原文件格式（仅 MPS 页）"
-	if clean {
+	if effectiveClean {
 		label = "纯数据（仅 MPS 页）"
 	}
 	s.log.Success("导出", "%s v%d（%s）→ %s（%s，%d 行 × %d 列，条件格式 %d 行，注释 %d 条，宏保留 %v）",

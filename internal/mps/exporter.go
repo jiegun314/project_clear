@@ -300,6 +300,19 @@ func prepareConditionalFormats(in ExportInput, dest string, cfRows, headerRows m
 	return cfRows, nil
 }
 
+// WriteBlankTemplate creates a minimal workbook with only the MPS sheet. A week
+// that has a Local import but no Global source has no original MPS template; the
+// export engine still needs a workbook to copy and format, so this stands in for
+// one.
+func WriteBlankTemplate(path string) error {
+	f := excelize.NewFile()
+	defer f.Close()
+	if err := f.SetSheetName(f.GetSheetList()[0], SheetName); err != nil {
+		return err
+	}
+	return f.SaveAs(path)
+}
+
 // dropOtherSheets removes every worksheet except MPS, leaving the rest of the
 // package — styles, conditional formats, macros — as the source file had it.
 func dropOtherSheets(f *excelize.File) error {

@@ -224,6 +224,65 @@ func TestLocalCanStartANewWeekBeforeItsGlobal(t *testing.T) {
 	}
 }
 
+// Completing a Global import or importing a Local file is a finished dataset and
+// must appear in history immediately, before the week is integrated.
+func TestArchiveShowsCompletedImportsBeforeIntegration(t *testing.T) {
+	s := newTestService(t)
+	g := addGlobal(t, s, testRow("A", "100"))
+	list, err := s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Dataset != store.DatasetGlobal || list[0].DatasetID != g.ID {
+		t.Fatalf("history after Global finish = %+v", list)
+	}
+	if list[0].Expired {
+		t.Fatalf("unintegrated Global marked expired: %+v", list[0])
+	}
+	weeks, err := s.db.WeeksWithReadyData()
+	if err != nil || len(weeks) != 1 || weeks[0] != "2639" {
+		t.Fatalf("ready weeks = %v %v", weeks, err)
+	}
+	if ys, _ := s.Years(); len(ys) != 1 || ys[0] != 2026 {
+		t.Fatalf("years = %v", ys)
+	}
+	if ws, _ := s.Weeks(2026); len(ws) != 1 || ws[0] != 39 {
+		t.Fatalf("weeks = %v", ws)
+	}
+
+	l := addLocal(t, s, testRow("B", "200"))
+	list, err = s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("history after Local import = %+v", list)
+	}
+	seen := map[string]ArchiveEntry{}
+	for _, e := range list {
+		seen[e.Dataset] = e
+	}
+	if seen[store.DatasetGlobal].DatasetID != g.ID || seen[store.DatasetLocal].DatasetID != l.ID {
+		t.Fatalf("history entries = %+v", seen)
+	}
+	for _, e := range list {
+		if e.Expired {
+			t.Fatalf("pre-integration entry expired: %+v", e)
+		}
+	}
+
+	if _, _, _, err := s.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	list, err = s.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 3 || list[0].Dataset != store.DatasetMerged {
+		t.Fatalf("history after integration = %+v", list)
+	}
+}
+
 // A fresh launch must not reopen last session's imports, but history stays.
 func TestStartupWorkbenchIsBlankAndHistoryRemains(t *testing.T) {
 	s := newTestService(t)
@@ -374,6 +433,21 @@ func TestExportSingleDataset(t *testing.T) {
 	}
 	if stats.Rows != 2 || !fileExists(dest) {
 		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestExportLocalOnlyUsesBlankTemplate(t *testing.T) {
+	s := newTestService(t)
+	l := addLocal(t, s, testRow("A", "100"), testRow("B", "200"))
+	for _, mode := range []config.ExportMode{config.ExportClean, config.ExportTemplate} {
+		dest := filepath.Join(t.TempDir(), string(mode)+".xlsx")
+		stats, err := s.Export(ExportOptions{DatasetID: l.ID, DestPath: dest, Mode: mode}, nil)
+		if err != nil {
+			t.Fatalf("%s export: %v", mode, err)
+		}
+		if stats.Rows != 2 || !fileExists(dest) {
+			t.Fatalf("%s stats = %+v", mode, stats)
+		}
 	}
 }
 

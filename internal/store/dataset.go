@@ -167,6 +167,28 @@ func (s *Store) DatasetsOfWeek(week string) ([]*Dataset, error) {
 	return out, rows.Err()
 }
 
+// WeeksWithReadyData lists every week that has at least one completed dataset,
+// whether or not the week has been integrated. History is built from this list:
+// finishing a Global import or importing a Local file is already a completed
+// dataset, so it must appear there before 整合.
+func (s *Store) WeeksWithReadyData() ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT week_code FROM dataset WHERE status='ready' ORDER BY week_code DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var week string
+		if err := rows.Scan(&week); err != nil {
+			return nil, err
+		}
+		out = append(out, week)
+	}
+	return out, rows.Err()
+}
+
 // LatestWeek is the week of the most recently touched ready dataset or draft.
 func (s *Store) LatestWeek() (string, error) {
 	var week string

@@ -159,7 +159,7 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', borderTop: `1px solid ${JNJ.divider}` }}>
         {archive.length === 0 ? (
           <div style={{ padding: 16 }}>
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未整合任何周数据" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未完成任何周数据导入" />
           </div>
         ) : (
           archive.map((e) => (

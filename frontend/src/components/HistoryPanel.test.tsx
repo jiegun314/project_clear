@@ -59,6 +59,21 @@ describe('HistoryPanel', () => {
     expect(screen.getByText(/v2/)).toBeTruthy();
   });
 
+  it('lists a week whose imports are complete but not integrated yet', async () => {
+    mocked.getArchive.mockResolvedValue([
+      entry('global', 101, 1516),
+      entry('local', 102, 1736),
+    ]);
+    const onView = vi.fn();
+    render(<HistoryPanel onView={onView} reloadToken={0} />);
+
+    expect(await screen.findByText('Global')).toBeTruthy();
+    expect(screen.getByText('Local')).toBeTruthy();
+    expect(screen.queryByText('整合')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
+    await waitFor(() => expect(onView).toHaveBeenCalledWith(101, 'global'));
+  });
+
   it('marks only the integration row as expired; Global and Local stay current', async () => {
     // After a new Global import the history's Global row moves to the new
     // version, while the integration — and only the integration — is outdated.
