@@ -50,7 +50,7 @@ function renderGrid(datasetID: number, reloadToken = 0) {
       headerDisplay="twoRow"
       pageSize={200}
       reloadToken={reloadToken}
-      title="数据清单"
+      title="数据工作台"
       emptyText="这份数据还没有导入"
     />,
   );
@@ -94,7 +94,7 @@ describe('DataGrid', () => {
     const view = renderGrid(1);
     await vi.waitFor(() => expect(mocked.queryData).toHaveBeenCalledTimes(1));
     view.rerender(
-      <DataGrid datasetID={2} headerDisplay="twoRow" pageSize={200} reloadToken={0} title="数据清单" emptyText="这份数据还没有导入" />,
+      <DataGrid datasetID={2} headerDisplay="twoRow" pageSize={200} reloadToken={0} title="数据工作台" emptyText="这份数据还没有导入" />,
     );
 
     expect((await screen.findAllByText('NEWER')).length).toBeGreaterThan(0);
@@ -114,7 +114,7 @@ describe('DataGrid', () => {
     mocked.getGridHeader.mockResolvedValue(header(1, '2639'));
     mocked.queryData.mockResolvedValue(result([row(1, 'ITEM-0001')], 1516));
     view.rerender(
-      <DataGrid datasetID={1} headerDisplay="twoRow" pageSize={200} reloadToken={1} title="数据清单" emptyText="这份数据还没有导入" />,
+      <DataGrid datasetID={1} headerDisplay="twoRow" pageSize={200} reloadToken={1} title="数据工作台" emptyText="这份数据还没有导入" />,
     );
 
     expect((await screen.findAllByText('ITEM-0001')).length).toBeGreaterThan(0);

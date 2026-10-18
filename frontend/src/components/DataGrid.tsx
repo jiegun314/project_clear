@@ -13,7 +13,7 @@ export interface DataGridProps {
   pageSize: number;
   /** Bumped by the parent after an import or commit to force a reload. */
   reloadToken: number;
-  /** The list's name: 数据清单 plus the state suffix, worded by the shell. */
+  /** The list's name: 数据工作台 plus the state suffix, worded by the shell. */
   title: string;
   /** Shown when there are no rows; the shell words it from the data state. */
   emptyText?: string;

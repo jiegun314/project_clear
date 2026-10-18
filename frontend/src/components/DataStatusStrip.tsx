@@ -205,13 +205,13 @@ export function titleFor(state: DataState): string {
   if (state.kind === 'workspace') {
     const s = state.status;
     const kind = state.selectedKind;
-    if (kind === 'draft') return '数据清单 - Global（导入中）';
-    if (kind === 'local') return `数据清单 - Local v${s.localVersion}`;
-    if (kind === 'global') return `数据清单 - Global v${s.globalVersion}`;
-    return `数据清单 - 已整合（周码 ${s.integrationWeek || s.activeWeek}）`;
+    if (kind === 'draft') return '数据工作台 - Global（导入中）';
+    if (kind === 'local') return `数据工作台 - Local v${s.localVersion}`;
+    if (kind === 'global') return `数据工作台 - Global v${s.globalVersion}`;
+    return `数据工作台 - 已整合（周码 ${s.integrationWeek || s.activeWeek}）`;
   }
-  if (state.kind === 'cleared') return '数据清单 - 已清空';
-  return '数据清单';
+  if (state.kind === 'cleared') return '数据工作台 - 已清空';
+  return '数据工作台';
 }
 
 /** What the table says when it has no rows. */
