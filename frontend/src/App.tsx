@@ -164,6 +164,7 @@ export default function App() {
           <HistoryPanel
             onView={actions.openHistory}
             reloadToken={backend.reloadToken}
+            activeWeek={backend.status?.activeWeek ?? ''}
           />
           <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
             <LogPanel />

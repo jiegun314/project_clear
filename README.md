@@ -19,8 +19,8 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 | Local 导入 | 选完文件、格式检查通过即完成 | 一个带版本号的 **Local 数据集** |
 | 整合 | 两份都完成后点 **整合** | 合并数据集 + 一条整合记录 |
 
-**完成导入就进入历史数据。** 完成 Global 导入或导入 Local 后，该周立即出现在左下角历史数据；
-整合前显示 Global / Local，整合成功后增加整合行。底部状态栏的「已整合」仍只统计已经整合的周。
+**完成导入就进入历史数据。** 完成 Global 导入或导入 Local 后，该周立即出现在左下角历史数据，年份/周选择器与「查看」
+会自动跟随到该周；整合前显示 Global / Local，整合成功后增加整合行。底部状态栏的「已整合」仍只统计已经整合的周。
 
 **每次启动都是一个空工作台。** 数据工作台、已导入文件和状态条不会自动显示上次会话的数据；
 已完成的导入和整合数据从左下角历史数据查看；未完成的草稿在启动时丢弃。已完成的 Global / Local 仍保存在本地数据库中，
@@ -164,11 +164,11 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 ```bash
 # macOS（Apple Silicon）
 ./scripts/build-darwin.sh
-# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.1.3-darwin-arm64.zip
+# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.1.4-darwin-arm64.zip
 
 # Windows（在 Windows 上）
 ./scripts/build-windows.sh
-# 产物：dist/CLEAR-2.1.3-windows-amd64.zip
+# 产物：dist/CLEAR-2.1.4-windows-amd64.zip
 ```
 
 构建脚本会在 `wails build -clean` 前把 `build/bin/data` 与 `build/bin/config` 暂存到 `build/.clear-build-stash`，
@@ -246,7 +246,8 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 
 ## 10. 版本
 
-当前版本 **2.1.3**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
+当前版本 **2.1.4**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
 2.1.1 修复「导入本地 MPS 文件」误打开文件夹选择器的问题；
 2.1.2 修复完成 Global 导入或 Local 导入后、未整合时不出现在历史数据里的问题；
-2.1.3 把主数据清单更名为「数据工作台」。
+2.1.3 把主数据清单更名为「数据工作台」；
+2.1.4 完成导入后左下角历史数据自动跟随到新周。

@@ -93,7 +93,11 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.1.3）
+本版更新（v2.1.4）
+  1. 完成 Global 导入或导入 Local 后，左下角历史数据的年份/周选择器和「查看」自动跟随到该周，
+     不再停留在之前查看的周。
+
+包含 v2.1.3 的改动
   1. 主数据清单更名为「数据工作台」；左下角「历史数据」名称不变。
 
 包含 v2.1.2 的改动

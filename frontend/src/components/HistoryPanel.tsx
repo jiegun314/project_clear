@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Select, Button, Typography, Empty, Tooltip, Tag } from 'antd';
 import { History, Eye } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
@@ -10,6 +10,12 @@ export interface HistoryPanelProps {
   /** Fixed minimum width, as required: the panel must not follow the window. */
   onView: (datasetId: number, dataset: string) => void;
   reloadToken: number;
+  /**
+   * The week the current workbench is on. When a new import completes, the
+   * history selectors should follow it instead of staying on the previously
+   * viewed week; an empty value (fresh launch) leaves the default selection.
+   */
+  activeWeek?: string;
 }
 
 /**
@@ -17,13 +23,16 @@ export interface HistoryPanelProps {
  * integrated datasets. One week holds 整合 / Global / Local; each is a separate
  * dataset and opens on its own.
  */
-export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
+export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPanelProps) {
   const [years, setYears] = useState<number[]>([]);
   const [weeks, setWeeks] = useState<number[]>([]);
   const [year, setYear] = useState<number | null>(null);
   const [week, setWeek] = useState<number | null>(null);
   const [archive, setArchive] = useState<ArchiveEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  // The week the user was last auto-focused on. A manual year/week change is
+  // not fought by every refresh, but a new workbench week wins once.
+  const lastFocus = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -32,10 +41,19 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
       try {
         const [ys, list] = await Promise.all([api.getYears(), api.getArchive()]);
         if (!alive) return;
+        const rows = list ?? [];
         setYears(ys ?? []);
-        setArchive(list ?? []);
-        if (ys && ys.length) setYear((prev) => prev ?? ys[0]);
-        else setYear(null);
+        setArchive(rows);
+        const focus = activeWeek ? rows.find((e) => e.weekCode === activeWeek) : undefined;
+        if (focus && lastFocus.current !== activeWeek) {
+          lastFocus.current = activeWeek;
+          setYear(focus.year);
+          setWeek(focus.weekNo);
+        } else {
+          if (activeWeek && !focus) lastFocus.current = null;
+          if (ys && ys.length) setYear((prev) => prev ?? ys[0]);
+          else setYear(null);
+        }
       } finally {
         if (alive) setLoading(false);
       }
@@ -44,7 +62,7 @@ export function HistoryPanel({ onView, reloadToken }: HistoryPanelProps) {
     return () => {
       alive = false;
     };
-  }, [reloadToken]);
+  }, [reloadToken, activeWeek]);
 
   useEffect(() => {
     let alive = true;

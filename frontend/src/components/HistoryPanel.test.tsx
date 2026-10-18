@@ -9,10 +9,17 @@ vi.mock('../services/api', () => ({
 const { api } = await import('../services/api');
 const mocked = vi.mocked(api);
 
-function entry(dataset: string, id: number, rows: number, expired = false): ArchiveEntry {
+function entry(
+  dataset: string,
+  id: number,
+  rows: number,
+  expired = false,
+  weekCode = '2639',
+  weekNo = 39,
+): ArchiveEntry {
   return {
-    weekCode: '2639', weekStart: '2026-09-21', year: 2026, weekNo: 39,
-    dataset, datasetId: id, version: 2, rowCount: rows, fileCount: 13,
+    weekCode, weekStart: weekNo === 40 ? '2026-09-28' : '2026-09-21',
+    year: 2026, weekNo, dataset, datasetId: id, version: 2, rowCount: rows, fileCount: 13,
     committedAt: '2026-10-10 21:06:55', expired,
   };
 }
@@ -57,6 +64,24 @@ describe('HistoryPanel', () => {
     render(<HistoryPanel onView={() => {}} reloadToken={0} />);
     expect(await screen.findByText('该周整合已过期')).toBeTruthy();
     expect(screen.getByText(/v2/)).toBeTruthy();
+  });
+
+  it('follows the workbench to a newly imported week', async () => {
+    mocked.getArchive.mockResolvedValue([
+      entry('merged', 200, 2580, false, '2640', 40),
+      entry('global', 201, 1516, false, '2640', 40),
+      entry('merged', 100, 2580, false, '2639', 39),
+    ]);
+    mocked.getWeeks.mockResolvedValue([40, 39]);
+    const onView = vi.fn();
+
+    render(<HistoryPanel onView={onView} reloadToken={1} activeWeek="2640" />);
+
+    // The selectors and 查看 target follow the new week, not the previously
+    // selected 2639.
+    expect(await screen.findByText('第 40 周')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
+    await waitFor(() => expect(onView).toHaveBeenCalledWith(200, 'merged'));
   });
 
   it('lists a week whose imports are complete but not integrated yet', async () => {

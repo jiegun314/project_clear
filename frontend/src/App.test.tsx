@@ -158,6 +158,17 @@ describe('App', () => {
     expect(screen.getByText('Local 数据 v1')).toBeTruthy();
   });
 
+  it('points the history panel at the current workbench week', async () => {
+    mocked.getArchive.mockResolvedValue([
+      { weekCode: '2639', weekStart: '2026-09-21', year: 2026, weekNo: 39, dataset: 'merged', datasetId: 100, version: 1, rowCount: 2580, fileCount: 14, committedAt: '2026-09-22 11:00:00', expired: false },
+      { weekCode: '2640', weekStart: '2026-09-28', year: 2026, weekNo: 40, dataset: 'global', datasetId: 101, version: 1, rowCount: 1516, fileCount: 13, committedAt: '2026-10-18 09:00:00', expired: false },
+    ]);
+    mocked.getWeeks.mockResolvedValue([40, 39]);
+    mocked.getStatus.mockResolvedValue({ ...STATUS, activeWeek: '2640' });
+    await renderApp('2640 · Global v2 1,516 / Local v1 1,736');
+    expect(await screen.findByText('第 40 周')).toBeTruthy();
+  });
+
   it('starts with an empty workbench but keeps the history panel', async () => {
     mocked.getStatus.mockResolvedValue(BLANK);
     render(<App />);
