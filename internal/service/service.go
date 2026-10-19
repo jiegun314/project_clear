@@ -541,7 +541,8 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 	if progress != nil {
 		progress("读取本地文件", 0, 2)
 	}
-	local, err := mps.ReadLocalFile(path, mps.ReadOptions{LOCFilter: cfg.LOCFilter})
+	dict := mps.NewStyleDict()
+	local, err := mps.ReadLocalFile(path, mps.ReadOptions{LOCFilter: cfg.LOCFilter, Dict: dict})
 	if err != nil {
 		s.log.Error("本地", "%s 格式检查未通过: %v", name, err)
 		return nil, err
@@ -565,6 +566,7 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 	for _, r := range local.Rows {
 		rows = append(rows, store.StagedRow{
 			FileName: name, FilePath: path, SourceRow: r.SourceRow, Index: r.Index, Weeks: r.Weeks,
+			StyleIDs: r.StyleIDs, Comments: r.Comments, CFColors: r.CFColors,
 		})
 	}
 	var size int64
@@ -581,7 +583,7 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 	}
 	snap, _ := json.Marshal(cfg)
 	d, err := s.db.CreateLocalDataset(week, local.Header.Weeks[0].StartText(),
-		weekCodes(local.Header.Weeks), local.Header.IndexNames, string(snap), files, rows)
+		weekCodes(local.Header.Weeks), local.Header.IndexNames, string(snap), files, rows, dict)
 	if err != nil {
 		s.log.Error("本地", "写入 Local 数据失败: %v", err)
 		return nil, err
@@ -1033,7 +1035,8 @@ func (s *Service) Export(opt ExportOptions, progress Progress) (*mps.ExportStats
 	for _, r := range rows {
 		exportRows = append(exportRows, mps.ExportRow{
 			Index: r.Index, Weeks: r.Weeks, StyleIDs: r.StyleIDs,
-			CF: r.CF, Comments: r.Comments, SourceRow: r.SourceRow, FileName: r.FileName,
+			CF: r.CF, Comments: r.Comments, CFColors: r.CFColors,
+			SourceRow: r.SourceRow, FileName: r.FileName,
 		})
 	}
 	if progress != nil {
@@ -1119,6 +1122,10 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 	if progress != nil {
 		progress("读取数据", 0, 2)
 	}
+	styles, err := s.styleMap()
+	if err != nil {
+		return nil, err
+	}
 	sheets := make([]mps.BundleSheet, 0, 3)
 	for _, p := range parts {
 		d, rows, err := s.db.ExportRows(p.id)
@@ -1127,7 +1134,7 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 		}
 		sheets = append(sheets, mps.BundleSheet{
 			Name: p.sheet, Weeks: parseWeekCodes(d.WeekCodes),
-			IndexNames: d.IndexNames, Rows: toMPSRows(rows),
+			IndexNames: d.IndexNames, Rows: toMPSRows(rows), StyleByID: styles,
 		})
 	}
 	if progress != nil {
@@ -1315,7 +1322,8 @@ func toMPSRows(rows []store.ExportRow) []mps.ExportRow {
 	for _, r := range rows {
 		out = append(out, mps.ExportRow{
 			Index: r.Index, Weeks: r.Weeks, StyleIDs: r.StyleIDs,
-			CF: r.CF, Comments: r.Comments, SourceRow: r.SourceRow, FileName: r.FileName,
+			CF: r.CF, Comments: r.Comments, CFColors: r.CFColors,
+			SourceRow: r.SourceRow, FileName: r.FileName,
 		})
 	}
 	return out

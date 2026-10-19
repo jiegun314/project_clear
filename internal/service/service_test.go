@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"project_clear/internal/config"
@@ -85,7 +86,7 @@ func addGlobalFrom(t *testing.T, s *Service, baseID int64, rows ...store.StagedR
 func addLocal(t *testing.T, s *Service, rows ...store.StagedRow) *store.Dataset {
 	t.Helper()
 	files := []store.StagedFile{{Path: "/in/local.xlsx", Name: "local.xlsx", Status: "ok", RowsTotal: len(rows), RowsKept: len(rows), WeekCode: "2639"}}
-	d, err := s.db.CreateLocalDataset("2639", "2026-09-21", []string{"2639"}, testIndexNames, "", files, rows)
+	d, err := s.db.CreateLocalDataset("2639", "2026-09-21", []string{"2639"}, testIndexNames, "", files, rows, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestLocalCanStartANewWeekBeforeItsGlobal(t *testing.T) {
 	// stand in the way, and the Local becomes the active week.
 	local, err := s.db.CreateLocalDataset("2640", "2026-09-28", []string{"2640"}, testIndexNames, "",
 		[]store.StagedFile{{Path: "/in/local.xlsx", Name: "local.xlsx", Status: "ok", RowsKept: 2, WeekCode: "2640"}},
-		[]store.StagedRow{testRow("B", "250"), testRow("C", "300")})
+		[]store.StagedRow{testRow("B", "250"), testRow("C", "300")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,6 +434,89 @@ func TestExportSingleDataset(t *testing.T) {
 	}
 	if stats.Rows != 2 || !fileExists(dest) {
 		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestExportBundlePreservesColorsAndComments(t *testing.T) {
+	s := newTestService(t)
+	dict := mps.NewStyleDict()
+	styleID, err := dict.InternStyle(&excelize.Style{
+		Font: &excelize.Font{Size: 9, Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"00FF00"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := testRow("A", "100")
+	row.StyleIDs = make([]int, mps.IndexCols+1)
+	for i := range row.StyleIDs {
+		row.StyleIDs[i] = styleID
+	}
+	row.Comments = mps.CommentMap{16: {Text: "备注", Author: "me"}}
+	row.CFColors = []string{"#FF0000"}
+
+	d, err := s.db.BeginGlobalImport("2639", "2026-09-21", []string{"2639"}, testIndexNames, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.AddDraftData(d.ID, []store.StagedFile{{Path: "/in/a.xlsm", Name: "a.xlsm", Status: "ok", RowsKept: 1, WeekCode: "2639"}},
+		[]store.StagedRow{row}, nil, dict, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishGlobal(false); err != nil {
+		t.Fatal(err)
+	}
+	addLocal(t, s, testRow("B", "200"))
+	if _, _, _, err := s.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "bundle.xlsx")
+	if _, err := s.ExportBundle(BundleExportOptions{WeekCode: "2639", DestPath: dest}, nil); err != nil {
+		t.Fatal(err)
+	}
+	f, err := excelize.OpenFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	for _, sheet := range []string{"MPS", "Global"} {
+		style, err := f.GetCellStyle(sheet, "P4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := f.GetStyle(style)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(st.Fill.Color) == 0 || !strings.Contains(strings.ToUpper(st.Fill.Color[0]), "FF0000") {
+			t.Fatalf("%s P4 fill = %+v, want the conditional red", sheet, st.Fill)
+		}
+		static, err := f.GetCellStyle(sheet, "A4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sst, err := f.GetStyle(static)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sst.Fill.Color) == 0 || !strings.Contains(strings.ToUpper(sst.Fill.Color[0]), "00FF00") {
+			t.Fatalf("%s A4 fill = %+v, want the source green", sheet, sst.Fill)
+		}
+	}
+	comments, err := f.GetComments("MPS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range comments {
+		if c.Cell == "P4" && c.Text == "备注" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("MPS comments = %+v, want P4 备注", comments)
 	}
 }
 

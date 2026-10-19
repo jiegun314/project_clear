@@ -389,7 +389,7 @@ func (s *Store) FinishDraft(id int64, confirmFailures bool) (*Dataset, error) {
 
 // CreateLocalDataset stores a complete Local import as a ready dataset.
 func (s *Store) CreateLocalDataset(week, weekStart string, weekCodes, indexNames []string,
-	params string, files []StagedFile, rows []StagedRow) (*Dataset, error) {
+	params string, files []StagedFile, rows []StagedRow, dict *mps.StyleDict) (*Dataset, error) {
 	if _, err := mustWeek(week); err != nil {
 		return nil, err
 	}
@@ -422,7 +422,11 @@ func (s *Store) CreateLocalDataset(week, weekStart string, weekCodes, indexNames
 	if err != nil {
 		return nil, err
 	}
-	if err := writeDatasetRowsTx(tx, id, 0, rows, map[int]int{}, fileIDs); err != nil {
+	styleMap, err := resolveStyleIDsTx(tx, dict)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeDatasetRowsTx(tx, id, 0, rows, styleMap, fileIDs); err != nil {
 		return nil, err
 	}
 	if err := refreshCountsTx(tx, id); err != nil {

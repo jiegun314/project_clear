@@ -1,9 +1,11 @@
 package mps
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -19,6 +21,10 @@ type BundleSheet struct {
 	IndexNames []string
 	// Rows are the data rows, already ordered.
 	Rows []ExportRow
+	// StyleByID resolves the persisted style ids carried by each row. The plain
+	// bundle dump used to drop them along with the notes; both are part of the
+	// source pages and have to travel with the three tables.
+	StyleByID func(id int) (json.RawMessage, bool)
 }
 
 // BundleInput is a whole three-table workbook: one sheet per dataset.
@@ -165,6 +171,9 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		}
 	}
 
+	resolver := newStyleResolver(f)
+	styleCache := map[int]int{}
+	cfCache := map[string]int{}
 	for r, row := range sheet.Rows {
 		excelRow := FirstDataRowOfBundle + r
 		for c := 0; c < IndexCols; c++ {
@@ -187,6 +196,94 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		}
 		if err := f.SetCellStyle(sheet.Name, CellRef(1, excelRow), CellRef(totalCols, excelRow), dataStyle); err != nil {
 			return err
+		}
+
+		// Restore the source cell styles (fills, fonts, borders, number formats)
+		// in coalesced runs, the same way the single-sheet export does.
+		if sheet.StyleByID != nil {
+			ids := make([]int, totalCols)
+			for c := 0; c < totalCols; c++ {
+				ids[c] = dataStyle
+				if c >= len(row.StyleIDs) {
+					continue
+				}
+				dbID := row.StyleIDs[c]
+				if dbID == 0 {
+					continue
+				}
+				if sid, ok := styleCache[dbID]; ok {
+					ids[c] = sid
+					continue
+				}
+				sig, ok := sheet.StyleByID(dbID)
+				if !ok {
+					continue
+				}
+				sid, _ := resolver.resolve(sig)
+				styleCache[dbID] = sid
+				ids[c] = sid
+			}
+			for _, run := range coalesceRuns(ids) {
+				if err := f.SetCellStyle(sheet.Name, CellRef(run.from, excelRow), CellRef(run.to, excelRow), run.styleID); err != nil {
+					return err
+				}
+			}
+		}
+
+		// The bundle has no live conditional-format rules. Write the colour they
+		// would paint, on top of the static style, so the week cells keep the
+		// signal colours of the original pages.
+		for i, color := range row.CFColors {
+			if i >= len(sheet.Weeks) {
+				break
+			}
+			fill := bundleARGB(color)
+			if fill == "" {
+				continue
+			}
+			var st excelize.Style
+			if sheet.StyleByID != nil {
+				if c := IndexCols + i; c < len(row.StyleIDs) && row.StyleIDs[c] != 0 {
+					if sig, ok := sheet.StyleByID(row.StyleIDs[c]); ok {
+						_ = json.Unmarshal(sig, &st)
+					}
+				}
+			}
+			if st.Font == nil {
+				st.Font = &excelize.Font{Size: 8}
+			}
+			st.Fill = excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{fill}}
+			payload, err := json.Marshal(st)
+			if err != nil {
+				continue
+			}
+			key := string(payload)
+			sid, ok := cfCache[key]
+			if !ok {
+				sid, _ = resolver.resolve(payload)
+				cfCache[key] = sid
+			}
+			ref := CellRef(FirstWeekCol+i, excelRow)
+			if err := f.SetCellStyle(sheet.Name, ref, ref, sid); err != nil {
+				return err
+			}
+		}
+
+		// Notes travel with the row exactly as they did in the source.
+		for col, c := range row.Comments {
+			text := strings.TrimSpace(c.Text)
+			if col < 1 || col > totalCols || text == "" {
+				continue
+			}
+			author := c.Author
+			if author == "" {
+				author = "CLEAR"
+			}
+			if err := f.AddComment(sheet.Name, excelize.Comment{
+				Cell: CellRef(col, excelRow), Author: author, Text: text,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -213,6 +310,21 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		}
 	}
 	return nil
+}
+
+// bundleARGB turns the grid's #RRGGBB conditional-format colour into the
+// ARGB string Excelize's fill expects.
+func bundleARGB(color string) string {
+	v := strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(color, "#")))
+	switch len(v) {
+	case 6:
+		return v
+	case 8:
+		// Excelize's fill colours are RGB here; drop the alpha prefix rather than
+		// handing it an ARGB value it reads back as black.
+		return v[2:]
+	}
+	return ""
 }
 
 // FirstDataRowOfBundle is where the data starts in a three-table sheet: the

@@ -59,6 +59,10 @@ type ExportRow struct {
 	CF CFRow
 	// Comments maps a column number to its comment text.
 	Comments CommentMap
+	// CFColors is the conditional-format colour per week cell, aligned to Weeks.
+	// The bundle has no live conditional-format rules, so it writes these as
+	// static fills to keep the signal colours the grid shows.
+	CFColors []string
 	// SourceRow is the worksheet row the row came from, used to decide
 	// whether a rule still refers to a row that survived filtering.
 	SourceRow int

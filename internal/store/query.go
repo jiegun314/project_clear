@@ -291,6 +291,7 @@ type ExportRow struct {
 	StyleIDs  []int
 	CF        mps.CFRow
 	Comments  mps.CommentMap
+	CFColors  []string
 	FileName  string
 	SourceRow int
 }
@@ -318,7 +319,8 @@ func (s *Store) ExportRows(datasetID int64) (*Dataset, []ExportRow, error) {
 		}
 		out = append(out, ExportRow{
 			Index: r.Index, Weeks: weeks, StyleIDs: r.StyleIDs,
-			CF: r.CF, Comments: r.Comments, SourceRow: r.SourceRow, FileName: r.FileName,
+			CF: r.CF, Comments: r.Comments, CFColors: r.CFColors,
+			SourceRow: r.SourceRow, FileName: r.FileName,
 		})
 	}
 	return d, out, nil

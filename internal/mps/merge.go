@@ -128,12 +128,15 @@ func MergeLocal(global Header, rows []*DataRow, local *LocalSheet) (*MergedData,
 		seen[key] = true
 		cp := *r
 		cp.Weeks = alignValues(r.Weeks, local.Header.Weeks, weeks)
-		// The local workbook is read for its values; it carries no styles, formats
-		// or annotations yet, so the merged rows start without them.
-		cp.StyleIDs = nil
-		cp.CF = CFRow{}
-		cp.Comments = nil
-		cp.CFColors = nil
+		cp.StyleIDs = alignStyles(r.StyleIDs, local.Header.Weeks, weeks, len(global.IndexNames))
+		cp.CFColors = alignValues(r.CFColors, local.Header.Weeks, weeks)
+		if narrower {
+			// Comments and conditional formats address columns directly; with a
+			// narrower week block they would move onto the wrong cells.
+			cp.CF = CFRow{}
+			cp.Comments = nil
+			cp.CFColors = nil
+		}
 		cp.SourceRow = r.SourceRow
 		out.Rows = append(out.Rows, &cp)
 		out.Sources = append(out.Sources, RowSource{Local: true, Index: i})

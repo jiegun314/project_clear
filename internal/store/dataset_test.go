@@ -56,7 +56,7 @@ func makeGlobal(t *testing.T, st *Store, rows []StagedRow) *Dataset {
 func makeLocal(t *testing.T, st *Store, rows []StagedRow) *Dataset {
 	t.Helper()
 	d, err := st.CreateLocalDataset("2639", "2026-09-21", []string{"2639"}, testIndexNames, "",
-		[]StagedFile{testFile("local.xlsx")}, rows)
+		[]StagedFile{testFile("local.xlsx")}, rows, nil)
 	if err != nil {
 		t.Fatalf("create local: %v", err)
 	}

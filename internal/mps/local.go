@@ -46,6 +46,9 @@ type LocalSheet struct {
 	// Rows are the kept rows, normalised to the MPS layout: Base Code and SAP Code
 	// dropped, Weeks aligned to Header.Weeks.
 	Rows []*DataRow `json:"-"`
+	// Dict holds the styles interned while reading; the caller maps them to the
+	// database ids when the Local dataset is written.
+	Dict *StyleDict `json:"-"`
 	// RowsTotal is how many data rows the sheet holds; RowsKept how many survived
 	// the LOC filter.
 	RowsTotal int `json:"rowsTotal"`
@@ -84,6 +87,27 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 
 	headerRow := rows[0]
 	out := &LocalSheet{Sheet: sheet}
+	dict := opt.Dict
+	if dict == nil {
+		dict = NewStyleDict()
+	}
+	out.Dict = dict
+	styleCache := map[int]int{}
+	// Comments are read once and indexed by worksheet row/column; the MPS layout
+	// renumbers columns, so they are translated when each row is built.
+	comments := map[int]map[int]Comment{}
+	if list, err := f.GetComments(sheet); err == nil {
+		for _, c := range list {
+			col, row, err := excelize.CellNameToCoordinates(c.Cell)
+			if err != nil {
+				continue
+			}
+			if comments[row] == nil {
+				comments[row] = map[int]Comment{}
+			}
+			comments[row][col] = Comment{Text: c.Text, Author: c.Author}
+		}
+	}
 	// Week columns in the order they appear, so Rows.Weeks lines up with the header
 	// even if a blank cell leaves a gap.
 	var weekCols []int
@@ -122,14 +146,26 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 			continue
 		}
 		dr := &DataRow{SourceRow: r + 1}
+		dr.StyleIDs = make([]int, IndexCols+len(weekCols))
 		for c := 1; c <= 9; c++ {
 			dr.Index[c-1] = localCell(row, c)
+			dr.StyleIDs[c-1] = localStyleID(f, sheet, dict, styleCache, c, r+1)
 		}
 		for c := 12; c <= 17; c++ { // L..Q on a 本地 sheet are J..O of the MPS layout
 			dr.Index[9+(c-12)] = localCell(row, c)
+			dr.StyleIDs[9+(c-12)] = localStyleID(f, sheet, dict, styleCache, c, r+1)
 		}
-		for _, col := range weekCols {
+		for i, col := range weekCols {
 			dr.Weeks = append(dr.Weeks, localCell(row, col+1))
+			dr.StyleIDs[IndexCols+i] = localStyleID(f, sheet, dict, styleCache, col+1, r+1)
+		}
+		for localCol, c := range comments[r+1] {
+			if mpsCol := localToMPSColumn(localCol); mpsCol > 0 {
+				if dr.Comments == nil {
+					dr.Comments = CommentMap{}
+				}
+				dr.Comments[mpsCol] = c
+			}
 		}
 		out.Rows = append(out.Rows, dr)
 		out.RowsKept++
@@ -141,6 +177,43 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 		return nil, fmt.Errorf("工作表 %q 没有数据行（第 %d 行起）", sheet, LocalDataRow)
 	}
 	return out, nil
+}
+
+// localStyleID interns the style of one Local cell. Styles repeat across rows, so
+// the excelize style id is cached before doing the JSON round trip.
+func localStyleID(f *excelize.File, sheet string, dict *StyleDict, cache map[int]int, col, row int) int {
+	sid, err := f.GetCellStyle(sheet, CellRef(col, row))
+	if err != nil || sid == 0 {
+		return 0
+	}
+	if id, ok := cache[sid]; ok {
+		return id
+	}
+	st, err := f.GetStyle(sid)
+	if err != nil || st == nil {
+		return 0
+	}
+	id, err := dict.InternStyle(st)
+	if err != nil {
+		return 0
+	}
+	cache[sid] = id
+	return id
+}
+
+// localToMPSColumn maps a 本地 workbook column onto the merged A..O + week
+// layout. Base Code and SAP Code (J/K) have no MPS equivalent.
+func localToMPSColumn(col int) int {
+	switch {
+	case col >= 1 && col <= 9:
+		return col
+	case col >= 12 && col <= 17:
+		// L..Q on a 本地 sheet are J..O (10..15) of the MPS layout.
+		return 10 + (col - 12)
+	case col >= LocalFirstWeekCol:
+		return IndexCols + (col - LocalFirstWeekCol) + 1
+	}
+	return 0
 }
 
 // localSheetName finds the sheet holding the local data: the usual name when it is

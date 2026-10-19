@@ -143,7 +143,9 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 | Local | 本周 Local 数据集 |
 | Global | 本周 Global 数据集 |
 
-三张表使用同一套表头和周列，行数与各自数据集一致。
+三张表使用同一套表头和周列，行数与各自数据集一致；源单元格的颜色、边框、字体和批注会随数据写入三张表，
+条件格式的信号色以静态底色保留。2.1.5 之前导入的 Local 数据集没有保存 Local 样式，重新导入一次 Local
+后 Local / 合并页才会带出原 Local 的颜色和批注。
 
 **整合已过期时仍允许导出**：导出的是上次整合结果，界面会明确提示；需要最新结果请先重新整合。
 
@@ -164,11 +166,11 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 ```bash
 # macOS（Apple Silicon）
 ./scripts/build-darwin.sh
-# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.1.4-darwin-arm64.zip
+# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.1.5-darwin-arm64.zip
 
 # Windows（在 Windows 上）
 ./scripts/build-windows.sh
-# 产物：dist/CLEAR-2.1.4-windows-amd64.zip
+# 产物：dist/CLEAR-2.1.5-windows-amd64.zip
 ```
 
 构建脚本会在 `wails build -clean` 前把 `build/bin/data` 与 `build/bin/config` 暂存到 `build/.clear-build-stash`，
@@ -246,8 +248,9 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 
 ## 10. 版本
 
-当前版本 **2.1.4**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
+当前版本 **2.1.5**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
 2.1.1 修复「导入本地 MPS 文件」误打开文件夹选择器的问题；
 2.1.2 修复完成 Global 导入或 Local 导入后、未整合时不出现在历史数据里的问题；
 2.1.3 把主数据清单更名为「数据工作台」；
-2.1.4 完成导入后左下角历史数据自动跟随到新周。
+2.1.4 完成导入后左下角历史数据自动跟随到新周；
+2.1.5 三表导出恢复源数据的颜色、边框、字体与批注。

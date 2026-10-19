@@ -93,7 +93,13 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.1.4）
+本版更新（v2.1.5）
+  1. 三表导出（MPS / Local / Global）恢复源数据的单元格颜色、边框、字体和批注；
+     条件格式的信号色以静态底色写入，不再使用统一的无样式数据行。
+  2. Local 读取也会保存 Local 工作簿自己的样式和批注；2.1.5 之前导入的 Local 数据集
+     没有保存这些信息，重新导入一次 Local 后 Local / 合并页才会带出原颜色和批注。
+
+包含 v2.1.4 的改动
   1. 完成 Global 导入或导入 Local 后，左下角历史数据的年份/周选择器和「查看」自动跟随到该周，
      不再停留在之前查看的周。
 
