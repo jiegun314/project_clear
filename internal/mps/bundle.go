@@ -163,6 +163,14 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		}
 	}
 
+	// The second row is part of the title band: the date cells carry the dates, and
+	// the A..O cells beside them keep the same colour instead of a white gap.
+	if totalCols > 0 {
+		if err := f.SetCellStyle(sheet.Name, CellRef(1, 2), CellRef(totalCols, 2), dateStyle); err != nil {
+			return err
+		}
+	}
+
 	// The spacer row is what the business file has between the dates and the
 	// data; it is painted but carries no values.
 	if totalCols > 0 {
@@ -172,7 +180,7 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 	}
 
 	resolver := newStyleResolver(f)
-	styleCache := map[int]int{}
+	styleCache := map[bundleStyleKey]int{}
 	cfCache := map[string]int{}
 	for r, row := range sheet.Rows {
 		excelRow := FirstDataRowOfBundle + r
@@ -201,6 +209,7 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		// Restore the source cell styles (fills, fonts, borders, number formats)
 		// in coalesced runs, the same way the single-sheet export does.
 		if sheet.StyleByID != nil {
+			keepTimeFill := bundleRowKeepsWeekFill(row)
 			ids := make([]int, totalCols)
 			for c := 0; c < totalCols; c++ {
 				ids[c] = dataStyle
@@ -211,7 +220,11 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 				if dbID == 0 {
 					continue
 				}
-				if sid, ok := styleCache[dbID]; ok {
+				// Only the week cells of a CalcOH/CalcOH2 row keep their source
+				// fill; every other data cell falls back to no fill.
+				allowFill := keepTimeFill && c+1 >= FirstWeekCol
+				key := bundleStyleKey{id: dbID, fill: allowFill}
+				if sid, ok := styleCache[key]; ok {
 					ids[c] = sid
 					continue
 				}
@@ -219,8 +232,11 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 				if !ok {
 					continue
 				}
+				if !allowFill {
+					sig = bundleWithoutFill(sig)
+				}
 				sid, _ := resolver.resolve(sig)
-				styleCache[dbID] = sid
+				styleCache[key] = sid
 				ids[c] = sid
 			}
 			for _, run := range coalesceRuns(ids) {
@@ -233,6 +249,9 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		// The bundle has no live conditional-format rules. Write the colour they
 		// would paint, on top of the static style, so the week cells keep the
 		// signal colours of the original pages.
+		if !bundleRowKeepsWeekFill(row) {
+			continue
+		}
 		for i, color := range row.CFColors {
 			if i >= len(sheet.Weeks) {
 				break
@@ -310,6 +329,35 @@ func writeBundleSheet(f *excelize.File, sheet BundleSheet, headerStyle, dateStyl
 		}
 	}
 	return nil
+}
+
+type bundleStyleKey struct {
+	id   int
+	fill bool
+}
+
+// bundleRowKeepsWeekFill is the business rule for the three-table file: only the
+// P-onward week cells of a row whose O column is CalcOH or CalcOH2 keep colour.
+func bundleRowKeepsWeekFill(row ExportRow) bool {
+	if len(row.Index) < IndexCols {
+		return false
+	}
+	value := strings.TrimSpace(row.Index[IndexCols-1])
+	return strings.EqualFold(value, "CalcOH") || strings.EqualFold(value, "CalcOH2")
+}
+
+// bundleWithoutFill keeps fonts, borders and number formats but drops the fill.
+func bundleWithoutFill(sig json.RawMessage) json.RawMessage {
+	var st excelize.Style
+	if err := json.Unmarshal(sig, &st); err != nil {
+		return sig
+	}
+	st.Fill = excelize.Fill{}
+	b, err := json.Marshal(st)
+	if err != nil {
+		return sig
+	}
+	return b
 }
 
 // bundleARGB turns the grid's #RRGGBB conditional-format colour into the

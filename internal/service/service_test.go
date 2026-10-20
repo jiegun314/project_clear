@@ -447,26 +447,37 @@ func TestExportBundlePreservesColorsAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := testRow("A", "100")
-	row.StyleIDs = make([]int, mps.IndexCols+1)
-	for i := range row.StyleIDs {
-		row.StyleIDs[i] = styleID
+	styled := func(item, value string) store.StagedRow {
+		r := testRow(item, value)
+		r.StyleIDs = make([]int, mps.IndexCols+1)
+		for i := range r.StyleIDs {
+			r.StyleIDs[i] = styleID
+		}
+		return r
 	}
-	row.Comments = mps.CommentMap{16: {Text: "备注", Author: "me"}}
-	row.CFColors = []string{"#FF0000"}
+	a := styled("A", "100")
+	a.Index[14] = "CalcOH"
+	a.CFColors = []string{"#FF0000"}
+	a.Comments = mps.CommentMap{16: {Text: "备注", Author: "me"}}
+	b := styled("B", "200")
+	b.Index[14] = "LOC"
+	b.CFColors = []string{"#00FF00"} // must not survive: O is LOC
+	c := styled("C", "300")
+	c.Index[14] = "CalcOH2"
+	c.CFColors = []string{"#0000FF"}
 
 	d, err := s.db.BeginGlobalImport("2639", "2026-09-21", []string{"2639"}, testIndexNames, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.AddDraftData(d.ID, []store.StagedFile{{Path: "/in/a.xlsm", Name: "a.xlsm", Status: "ok", RowsKept: 1, WeekCode: "2639"}},
-		[]store.StagedRow{row}, nil, dict, nil); err != nil {
+	if err := s.db.AddDraftData(d.ID, []store.StagedFile{{Path: "/in/a.xlsm", Name: "a.xlsm", Status: "ok", RowsKept: 3, WeekCode: "2639"}},
+		[]store.StagedRow{a, b, c}, nil, dict, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.FinishGlobal(false); err != nil {
 		t.Fatal(err)
 	}
-	addLocal(t, s, testRow("B", "200"))
+	addLocal(t, s, testRow("D", "400"))
 	if _, _, _, err := s.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -481,29 +492,47 @@ func TestExportBundlePreservesColorsAndComments(t *testing.T) {
 	}
 	defer f.Close()
 
+	fill := func(sheet, cell string) excelize.Fill {
+		t.Helper()
+		sid, err := f.GetCellStyle(sheet, cell)
+		if err != nil {
+			t.Fatalf("%s %s style: %v", sheet, cell, err)
+		}
+		st, err := f.GetStyle(sid)
+		if err != nil {
+			t.Fatalf("%s %s get style: %v", sheet, cell, err)
+		}
+		return st.Fill
+	}
+	hasColor := func(sheet, cell, want string) {
+		t.Helper()
+		got := fill(sheet, cell)
+		if got.Pattern == 0 || len(got.Color) == 0 || !strings.Contains(strings.ToUpper(got.Color[0]), want) {
+			t.Fatalf("%s %s fill = %+v, want %s", sheet, cell, got, want)
+		}
+	}
+	noFill := func(sheet, cell string) {
+		t.Helper()
+		got := fill(sheet, cell)
+		if got.Pattern != 0 {
+			t.Fatalf("%s %s fill = %+v, want no fill", sheet, cell, got)
+		}
+	}
+
 	for _, sheet := range []string{"MPS", "Global"} {
-		style, err := f.GetCellStyle(sheet, "P4")
-		if err != nil {
-			t.Fatal(err)
-		}
-		st, err := f.GetStyle(style)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(st.Fill.Color) == 0 || !strings.Contains(strings.ToUpper(st.Fill.Color[0]), "FF0000") {
-			t.Fatalf("%s P4 fill = %+v, want the conditional red", sheet, st.Fill)
-		}
-		static, err := f.GetCellStyle(sheet, "A4")
-		if err != nil {
-			t.Fatal(err)
-		}
-		sst, err := f.GetStyle(static)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(sst.Fill.Color) == 0 || !strings.Contains(strings.ToUpper(sst.Fill.Color[0]), "00FF00") {
-			t.Fatalf("%s A4 fill = %+v, want the source green", sheet, sst.Fill)
-		}
+		// Rows 1/2 (title and dates) and row 3 (filter) keep their colours.
+		hasColor(sheet, "A1", "EB1700")
+		hasColor(sheet, "A2", "EB1700")
+		hasColor(sheet, "A3", "D5CFC9")
+		// CalcOH: P onward keeps the CF colour; A..O has no fill.
+		noFill(sheet, "A4")
+		hasColor(sheet, "P4", "FF0000")
+		// LOC: no fill anywhere, even though the row carried a CF colour.
+		noFill(sheet, "A5")
+		noFill(sheet, "P5")
+		// CalcOH2: same rule as CalcOH, with its own colour.
+		noFill(sheet, "A6")
+		hasColor(sheet, "P6", "0000FF")
 	}
 	comments, err := f.GetComments("MPS")
 	if err != nil {
