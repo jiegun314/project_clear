@@ -167,11 +167,11 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 ```bash
 # macOS（Apple Silicon）
 ./scripts/build-darwin.sh
-# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.1.6-darwin-arm64.zip
+# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.1.7-darwin-arm64.zip
 
 # Windows（在 Windows 上）
 ./scripts/build-windows.sh
-# 产物：dist/CLEAR-2.1.6-windows-amd64.zip
+# 产物：dist/CLEAR-2.1.7-windows-amd64.zip
 ```
 
 构建脚本会在 `wails build -clean` 前把 `build/bin/data` 与 `build/bin/config` 暂存到 `build/.clear-build-stash`，
@@ -249,10 +249,11 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 
 ## 10. 版本
 
-当前版本 **2.1.6**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
+当前版本 **2.1.7**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
 2.1.1 修复「导入本地 MPS 文件」误打开文件夹选择器的问题；
 2.1.2 修复完成 Global 导入或 Local 导入后、未整合时不出现在历史数据里的问题；
 2.1.3 把主数据清单更名为「数据工作台」；
 2.1.4 完成导入后左下角历史数据自动跟随到新周；
 2.1.5 三表导出恢复源数据的颜色、边框、字体与批注；
-2.1.6 三表颜色改为按业务规则选择性保留（CalcOH / CalcOH2 行的 P 列起）。
+2.1.6 三表颜色改为按业务规则选择性保留（CalcOH / CalcOH2 行的 P 列起）；
+2.1.7 Local 导入支持新版 A–O 布局（Local 工作表、LOC 在 L、周列从 P 开始），同时兼容旧 Month End 布局。

@@ -93,7 +93,13 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.1.6）
+本版更新（v2.1.7）
+  1. Local 导入同时支持两种版式：
+     - 旧：Month End 工作表，A–Q（含 Base/SAP），LOC 在 N，周列从 R；
+     - 新：Local 工作表，A–O（无 Base/SAP），LOC 在 L，周列从 P。
+     两种版式归一化为同一套 A–O + 周列后进入整合。
+
+包含 v2.1.6 的改动
   1. 三表导出的颜色按业务规则选择性保留：第 1、2 行标题/日期行和第 3 行筛选行保留；
      数据行只有 O 列为 CalcOH 或 CalcOH2 的行、从 P 列起保留颜色；其余单元格无填充色。
      字体、边框和批注仍保留。

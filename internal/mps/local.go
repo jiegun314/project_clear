@@ -7,23 +7,41 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-// A 本地 MPS workbook (BW_CN_MPS … (Month End)) is the MPS layout with two extra
-// columns: J = Base Code and K = SAP Code. Everything after them shifts by two, so
-// LOC sits in N rather than L and the week codes start at R rather than P. That is
-// why it needs a reader of its own: ReadFile would take US CATALOG for LOC and OH
-// for the first week, and the values would merge into the result under the wrong
-// column names.
+// Local workbooks come in two layouts.
+//
+//   - Month End: the older layout with J = Base Code and K = SAP Code. Everything
+//     after them shifts by two, so LOC sits in N rather than L and the week codes
+//     start at R rather than P.
+//   - Local: the newer layout, which is the A..O MPS layout itself; LOC is in L
+//     and the week codes start at P.
+//
+// Both are normalised to the same A..O + week rows before storage, so the merge
+// and everything downstream see one shape.
+type localLayout int
+
 const (
-	// LocalFirstWeekCol is where the week codes start on a 本地 sheet (R).
+	localMonthEnd localLayout = iota
+	localGlobalStyle
+)
+
+const (
+	// LocalFirstWeekCol is where the week codes start on a Month End sheet (R).
 	LocalFirstWeekCol = 18
-	// LocalDataRow is the first data row.
+	// LocalNewFirstWeekCol is where the week codes start on the newer Local
+	// sheet (P).
+	LocalNewFirstWeekCol = 16
+	// LocalDataRow is the first data row in both layouts.
 	LocalDataRow = 4
-	// LocalItemCol is the ITEM column (I).
+	// LocalItemCol is the ITEM column (I) in both layouts.
 	LocalItemCol = 9
-	// LocalLOCCol is the LOC column (N).
+	// LocalLOCCol is the LOC column on a Month End sheet (N).
 	LocalLOCCol = 14
-	// LocalSheetName is the sheet the local workbook keeps its data on.
+	// LocalNewLOCCol is the LOC column on a newer Local sheet (L).
+	LocalNewLOCCol = 12
+	// LocalSheetName is the sheet the older local workbook keeps its data on.
 	LocalSheetName = "Month End"
+	// LocalNewSheetName is the sheet the newer local workbook uses.
+	LocalNewSheetName = "Local"
 )
 
 // LocalHeader is row 1 of a 本地 MPS sheet, columns A..Q.
@@ -31,6 +49,13 @@ var LocalHeader = []string{
 	"P5", "P4", "P3", "P2", "P1", "MFG GROUP", "MFG CLASS CODE", "MFG DESCR",
 	"ITEM", "Base Code", "SAP Code", "US CATALOG", "EU CATALOG", "LOC", "BO", "OH", "LOC",
 }
+
+// localMPSHeader is the A..O header both layouts normalise to: the Month End
+// header without Base Code and SAP Code.
+var localMPSHeader = func() []string {
+	out := append([]string{}, LocalHeader[:9]...)
+	return append(out, LocalHeader[11:]...)
+}()
 
 // LocalSheet is a 本地 MPS workbook read into the shape the rest of the pipeline
 // uses: the A..O index columns and the week values, exactly as a global workbook
@@ -67,7 +92,7 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 	}
 	defer f.Close()
 
-	sheet, err := localSheetName(f)
+	sheet, layout, err := localSheet(f)
 	if err != nil {
 		return nil, err
 	}
@@ -81,11 +106,13 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("工作表 %q 是空的", sheet)
 	}
-	if err := checkLocalHeader(sheet, rows[0]); err != nil {
-		return nil, err
-	}
-
 	headerRow := rows[0]
+	firstWeek := LocalFirstWeekCol
+	locCol := LocalLOCCol
+	if layout == localGlobalStyle {
+		firstWeek = LocalNewFirstWeekCol
+		locCol = LocalNewLOCCol
+	}
 	out := &LocalSheet{Sheet: sheet}
 	dict := opt.Dict
 	if dict == nil {
@@ -111,7 +138,7 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 	// Week columns in the order they appear, so Rows.Weeks lines up with the header
 	// even if a blank cell leaves a gap.
 	var weekCols []int
-	for i := LocalFirstWeekCol - 1; i < len(headerRow); i++ {
+	for i := firstWeek - 1; i < len(headerRow); i++ {
 		code := strings.TrimSpace(headerRow[i])
 		if code == "" {
 			continue
@@ -125,7 +152,7 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 		weekCols = append(weekCols, i)
 	}
 	if len(out.Header.Weeks) == 0 {
-		name, _ := ColumnName(LocalFirstWeekCol)
+		name, _ := ColumnName(firstWeek)
 		return nil, fmt.Errorf("第 1 行 %s 列起没有找到任何周码", name)
 	}
 	for i, name := range LocalHeader {
@@ -142,25 +169,38 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 		}
 		out.RowsTotal++
 		if want := strings.TrimSpace(opt.LOCFilter); want != "" &&
-			!strings.EqualFold(localCell(row, LocalLOCCol), want) {
+			!strings.EqualFold(localCell(row, locCol), want) {
 			continue
 		}
 		dr := &DataRow{SourceRow: r + 1}
 		dr.StyleIDs = make([]int, IndexCols+len(weekCols))
-		for c := 1; c <= 9; c++ {
-			dr.Index[c-1] = localCell(row, c)
-			dr.StyleIDs[c-1] = localStyleID(f, sheet, dict, styleCache, c, r+1)
-		}
-		for c := 12; c <= 17; c++ { // L..Q on a 本地 sheet are J..O of the MPS layout
-			dr.Index[9+(c-12)] = localCell(row, c)
-			dr.StyleIDs[9+(c-12)] = localStyleID(f, sheet, dict, styleCache, c, r+1)
+		if layout == localGlobalStyle {
+			for c := 1; c <= IndexCols; c++ {
+				dr.Index[c-1] = localCell(row, c)
+				dr.StyleIDs[c-1] = localStyleID(f, sheet, dict, styleCache, c, r+1)
+			}
+		} else {
+			for c := 1; c <= 9; c++ {
+				dr.Index[c-1] = localCell(row, c)
+				dr.StyleIDs[c-1] = localStyleID(f, sheet, dict, styleCache, c, r+1)
+			}
+			for c := 12; c <= 17; c++ { // L..Q on a 本地 sheet are J..O of the MPS layout
+				dr.Index[9+(c-12)] = localCell(row, c)
+				dr.StyleIDs[9+(c-12)] = localStyleID(f, sheet, dict, styleCache, c, r+1)
+			}
 		}
 		for i, col := range weekCols {
 			dr.Weeks = append(dr.Weeks, localCell(row, col+1))
 			dr.StyleIDs[IndexCols+i] = localStyleID(f, sheet, dict, styleCache, col+1, r+1)
 		}
 		for localCol, c := range comments[r+1] {
-			if mpsCol := localToMPSColumn(localCol); mpsCol > 0 {
+			mpsCol := 0
+			if layout == localGlobalStyle {
+				mpsCol = localNewToMPSColumn(localCol)
+			} else {
+				mpsCol = localMonthEndToMPSColumn(localCol)
+			}
+			if mpsCol > 0 {
 				if dr.Comments == nil {
 					dr.Comments = CommentMap{}
 				}
@@ -201,14 +241,14 @@ func localStyleID(f *excelize.File, sheet string, dict *StyleDict, cache map[int
 	return id
 }
 
-// localToMPSColumn maps a 本地 workbook column onto the merged A..O + week
-// layout. Base Code and SAP Code (J/K) have no MPS equivalent.
-func localToMPSColumn(col int) int {
+// localMonthEndToMPSColumn maps a Month End workbook column onto the merged
+// A..O + week layout. Base Code and SAP Code (J/K) have no MPS equivalent.
+func localMonthEndToMPSColumn(col int) int {
 	switch {
 	case col >= 1 && col <= 9:
 		return col
 	case col >= 12 && col <= 17:
-		// L..Q on a 本地 sheet are J..O (10..15) of the MPS layout.
+		// L..Q on a Month End sheet are J..O (10..15) of the MPS layout.
 		return 10 + (col - 12)
 	case col >= LocalFirstWeekCol:
 		return IndexCols + (col - LocalFirstWeekCol) + 1
@@ -216,38 +256,77 @@ func localToMPSColumn(col int) int {
 	return 0
 }
 
-// localSheetName finds the sheet holding the local data: the usual name when it is
-// there, otherwise any sheet whose first row looks like the layout.
-func localSheetName(f *excelize.File) (string, error) {
-	sheets := f.GetSheetList()
-	for _, name := range sheets {
-		if strings.EqualFold(strings.TrimSpace(name), LocalSheetName) {
-			return name, nil
-		}
+// localNewToMPSColumn maps the newer Local sheet's A..O + week columns; they
+// already are the MPS layout.
+func localNewToMPSColumn(col int) int {
+	switch {
+	case col >= 1 && col <= IndexCols:
+		return col
+	case col >= LocalNewFirstWeekCol:
+		return IndexCols + (col - LocalNewFirstWeekCol) + 1
 	}
-	for _, name := range sheets {
-		rows, err := f.GetRows(name)
-		if err != nil || len(rows) == 0 {
-			continue
-		}
-		if checkLocalHeader(name, rows[0]) == nil {
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("找不到本地 MPS 工作表 %q（文件里的工作表: %s）", LocalSheetName, strings.Join(sheets, "、"))
+	return 0
 }
 
-// checkLocalHeader compares row 1 with the layout the reader expects.
-func checkLocalHeader(sheet string, row []string) error {
-	for i, want := range LocalHeader {
-		got := localCell(row, i+1)
-		if !strings.EqualFold(got, want) {
-			name, _ := ColumnName(i + 1)
-			return fmt.Errorf("工作表 %q 第 1 行 %s 列是 %q，期望 %q：这不是本地 MPS 的版式",
-				sheet, name, got, want)
+// localSheet finds the sheet holding Local data and identifies its layout. The
+// two known layouts have different headers, so detection is by row 1 rather than
+// by trusting the sheet name.
+func localSheet(f *excelize.File) (string, localLayout, error) {
+	sheets := f.GetSheetList()
+	order := []string{}
+	for _, preferred := range []string{LocalSheetName, LocalNewSheetName} {
+		for _, name := range sheets {
+			if strings.EqualFold(strings.TrimSpace(name), preferred) {
+				order = append(order, name)
+			}
 		}
 	}
-	return nil
+	for _, name := range sheets {
+		found := false
+		for _, existing := range order {
+			if existing == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			order = append(order, name)
+		}
+	}
+	for _, name := range order {
+		cells := localHeaderRow(f, name)
+		if matchHeader(cells, LocalHeader) {
+			return name, localMonthEnd, nil
+		}
+		if matchHeader(cells, localMPSHeader) {
+			return name, localGlobalStyle, nil
+		}
+	}
+	return "", localMonthEnd, fmt.Errorf("找不到本地 MPS 工作表（支持 Month End A–Q 或 Local A–O 版式；文件里的工作表: %s）",
+		strings.Join(sheets, "、"))
+}
+
+// localHeaderRow reads row 1 without loading the whole worksheet, which matters
+// for the newer Local files with 14k+ rows.
+func localHeaderRow(f *excelize.File, sheet string) []string {
+	out := make([]string, 0, len(LocalHeader))
+	for c := 1; c <= len(LocalHeader); c++ {
+		v, _ := f.GetCellValue(sheet, CellRef(c, 1), excelize.Options{RawCellValue: true})
+		out = append(out, v)
+	}
+	return out
+}
+
+func matchHeader(cells, want []string) bool {
+	if len(cells) < len(want) {
+		return false
+	}
+	for i, expected := range want {
+		if !strings.EqualFold(strings.TrimSpace(cells[i]), expected) {
+			return false
+		}
+	}
+	return true
 }
 
 // localCell returns a 1-based column's text, empty when the row is short.
