@@ -448,6 +448,9 @@ export namespace view {
 	    committedAt: string;
 	    overwrote: boolean;
 	    wasExpired: boolean;
+	    requestedWeeks: number;
+	    mergedWeeks: number;
+	    warnings: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new CommitResult(source);
@@ -470,6 +473,9 @@ export namespace view {
 	        this.committedAt = source["committedAt"];
 	        this.overwrote = source["overwrote"];
 	        this.wasExpired = source["wasExpired"];
+	        this.requestedWeeks = source["requestedWeeks"];
+	        this.mergedWeeks = source["mergedWeeks"];
+	        this.warnings = source["warnings"];
 	    }
 	}
 	export class ConfigView {
@@ -682,6 +688,7 @@ export namespace view {
 	    globalFiles: number;
 	    globalVersion: number;
 	    globalAt: string;
+	    globalWeeks: number;
 	    hasLocal: boolean;
 	    localId: number;
 	    localWeek: string;
@@ -689,6 +696,7 @@ export namespace view {
 	    localFiles: number;
 	    localVersion: number;
 	    localAt: string;
+	    localWeeks: number;
 	    localFileName: string;
 	    hasIntegration: boolean;
 	    integrationId: number;
@@ -728,6 +736,7 @@ export namespace view {
 	        this.globalFiles = source["globalFiles"];
 	        this.globalVersion = source["globalVersion"];
 	        this.globalAt = source["globalAt"];
+	        this.globalWeeks = source["globalWeeks"];
 	        this.hasLocal = source["hasLocal"];
 	        this.localId = source["localId"];
 	        this.localWeek = source["localWeek"];
@@ -735,6 +744,7 @@ export namespace view {
 	        this.localFiles = source["localFiles"];
 	        this.localVersion = source["localVersion"];
 	        this.localAt = source["localAt"];
+	        this.localWeeks = source["localWeeks"];
 	        this.localFileName = source["localFileName"];
 	        this.hasIntegration = source["hasIntegration"];
 	        this.integrationId = source["integrationId"];

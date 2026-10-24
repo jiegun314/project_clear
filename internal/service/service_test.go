@@ -122,7 +122,7 @@ func TestServiceFinishIntegrateAndExpiry(t *testing.T) {
 	if len(files) != 1 || files[0].Dataset != "Global" || files[0].Name != "a.xlsm" {
 		t.Fatalf("files = %+v, want only the Global workbook", files)
 	}
-	res, had, wasExpired, err := s.Commit()
+	res, had, wasExpired, err := s.Commit(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestServiceFinishIntegrateAndExpiry(t *testing.T) {
 	}
 
 	// Re-integrating folds the new Global in and clears the expiry.
-	res, had, wasExpired, err = s.Commit()
+	res, had, wasExpired, err = s.Commit(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestLocalCanStartANewWeekBeforeItsGlobal(t *testing.T) {
 	s := newTestService(t)
 	addGlobal(t, s, testRow("A", "100"))
 	addLocal(t, s, testRow("B", "200"))
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 	// Week 2640's Local arrives before its Global; the integrated 2639 must not
@@ -272,7 +272,7 @@ func TestArchiveShowsCompletedImportsBeforeIntegration(t *testing.T) {
 		}
 	}
 
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 	list, err = s.Archive()
@@ -289,7 +289,7 @@ func TestStartupWorkbenchIsBlankAndHistoryRemains(t *testing.T) {
 	s := newTestService(t)
 	addGlobal(t, s, testRow("A", "100"))
 	addLocal(t, s, testRow("B", "200"))
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 	if ws, _ := s.Workspace(); ws.Week != "2639" {
@@ -323,7 +323,7 @@ func TestArchiveUpdatesOnlyTheReimportedInput(t *testing.T) {
 	s := newTestService(t)
 	g := addGlobal(t, s, testRow("A", "100"))
 	l := addLocal(t, s, testRow("B", "200"))
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -350,7 +350,7 @@ func TestArchiveUpdatesOnlyTheReimportedInput(t *testing.T) {
 		t.Fatalf("local row = %+v, want unchanged %d and not expired", got[store.DatasetLocal], l.ID)
 	}
 
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 	l2 := addLocal(t, s, testRow("D", "400"))
@@ -370,7 +370,7 @@ func TestDiscardWeekImportsKeepsHistory(t *testing.T) {
 	s := newTestService(t)
 	addGlobal(t, s, testRow("A", "100"))
 	addLocal(t, s, testRow("B", "200"))
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 	addGlobal(t, s, testRow("C", "300"))
@@ -394,7 +394,7 @@ func TestExportBundleWritesThreeSheets(t *testing.T) {
 	s := newTestService(t)
 	addGlobal(t, s, testRow("A", "100"), testRow("B", "200"))
 	addLocal(t, s, testRow("B", "250"), testRow("C", "300"))
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(t.TempDir(), "bundle.xlsx")
@@ -478,7 +478,7 @@ func TestExportBundlePreservesColorsAndComments(t *testing.T) {
 		t.Fatal(err)
 	}
 	addLocal(t, s, testRow("D", "400"))
-	if _, _, _, err := s.Commit(); err != nil {
+	if _, _, _, err := s.Commit(1); err != nil {
 		t.Fatal(err)
 	}
 

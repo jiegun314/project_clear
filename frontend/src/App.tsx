@@ -7,6 +7,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { AboutDialog } from './components/AboutDialog';
 import { ImportResultModal } from './components/ImportResultModal';
 import { HistoryView } from './components/HistoryView';
+import { MergeRangeDialog } from './components/MergeRangeDialog';
 import { DataStatusStrip, emptyTextFor, titleFor } from './components/DataStatusStrip';
 import { SummaryDialog } from './components/SummaryDialog';
 import { StagedFilesModal } from './components/StagedFilesModal';
@@ -75,7 +76,7 @@ export default function App() {
         onAdd={() => void actions.runImport('add')}
         onFinish={() => void actions.runFinishGlobal()}
         onImportLocal={() => void actions.runImportLocal()}
-        onCommit={() => void actions.runCommit()}
+        onCommit={actions.runCommit}
         onClear={actions.runDiscardDraft}
         onExport={() => void actions.runToolbarExport()}
         onViewFiles={actions.openFiles}
@@ -192,6 +193,15 @@ export default function App() {
         }}
       />
       <AboutDialog open={actions.aboutOpen} onClose={actions.closeAbout} />
+      <MergeRangeDialog
+        open={actions.mergeOpen}
+        globalWeeks={backend.status?.globalWeeks ?? 0}
+        localWeeks={backend.status?.localWeeks ?? 0}
+        defaultWeeks={actions.mergeWeeks}
+        onCancel={actions.closeMerge}
+        onConfirm={(weeks) => void actions.confirmMerge(weeks)}
+      />
+
       <HistoryView
         datasetId={actions.historyDatasetId}
         dataset={actions.historyDataset}

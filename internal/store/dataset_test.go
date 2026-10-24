@@ -168,7 +168,7 @@ func TestIntegrationAndExpiry(t *testing.T) {
 	st := openTestStore(t)
 	g := makeGlobal(t, st, []StagedRow{testRow("A", "100"), testRow("B", "200")})
 	l := makeLocal(t, st, []StagedRow{testRow("B", "250"), testRow("C", "300")})
-	res, err := st.Integrate("2639")
+	res, err := st.Integrate("2639", 61)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,11 +271,59 @@ func TestQueryDatasetSearchSortFilterAndPages(t *testing.T) {
 	}
 }
 
+func TestIntegrateRangeCutoffAndIntersectionWarning(t *testing.T) {
+	st := openTestStore(t)
+	g, err := st.BeginGlobalImport("2639", "2026-09-21", []string{"2639", "2640"}, testIndexNames, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grow := testRow("A", "100")
+	grow.Weeks = []string{"100", "200"}
+	if err := st.AddDraftData(g.ID, []StagedFile{testFile("a.xlsm")}, []StagedRow{grow}, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishDraft(g.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	lrow := testRow("B", "300")
+	lrow.Weeks = []string{"300", "400"}
+	l, err := st.CreateLocalDataset("2639", "2026-09-21", []string{"2639", "2640"}, testIndexNames, "",
+		[]StagedFile{testFile("local.xlsx")}, []StagedRow{lrow}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := st.Integrate("2639", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequestedWeeks != 1 || res.MergedWeeks != 1 || len(res.Warnings) != 0 {
+		t.Fatalf("limit 1 = %+v", res)
+	}
+	cur, _ := st.Current("2639", DatasetMerged)
+	if cur == nil || len(cur.WeekCodes) != 1 || cur.WeekCodes[0] != "2639" {
+		t.Fatalf("merged weeks = %+v", cur)
+	}
+
+	res, err = st.Integrate("2639", 61)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RequestedWeeks != 61 || res.MergedWeeks != 2 || len(res.Warnings) == 0 {
+		t.Fatalf("limit 61 = %+v", res)
+	}
+	cur, _ = st.Current("2639", DatasetMerged)
+	if cur == nil || len(cur.WeekCodes) != 2 || cur.WeekCodes[1] != "2640" {
+		t.Fatalf("merged weeks = %+v", cur)
+	}
+	_ = l
+}
+
 func TestDeleteDatasetRefusesOneAnIntegrationUses(t *testing.T) {
 	st := openTestStore(t)
 	g := makeGlobal(t, st, []StagedRow{testRow("A", "100")})
 	l := makeLocal(t, st, []StagedRow{testRow("B", "200")})
-	if _, err := st.Integrate("2639"); err != nil {
+	if _, err := st.Integrate("2639", 61); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.DeleteDataset(g.ID); err == nil {

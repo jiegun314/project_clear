@@ -93,7 +93,14 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.1.7）
+本版更新（v2.1.8）
+  1. Global 导入默认读取 P–BX 最多 61 周（读取列数至少 61），为整合时的
+     AO/BX 截止选择保留完整数据。
+  2. 整合弹窗可选择截止 AO（前 26 周）或 BX（前 61 周），同时作用于
+     Global 和 Local；两侧周列按周码取交集，范围不足时在结果弹窗和日志中警告。
+  3. 三表导出按本次选择的共同周列裁剪，Local/Global 页不会多出周列。
+
+包含 v2.1.7 的改动
   1. Local 导入同时支持两种版式：
      - 旧：Month End 工作表，A–Q（含 Base/SAP），LOC 在 N，周列从 R；
      - 新：Local 工作表，A–O（无 Base/SAP），LOC 在 L，周列从 P。

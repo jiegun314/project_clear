@@ -10,7 +10,7 @@ export function AddFiles():Promise<service.ImportResult>;
 
 export function ClearLogs():Promise<void>;
 
-export function Commit():Promise<view.CommitResult>;
+export function Commit(arg1:number):Promise<view.CommitResult>;
 
 export function DiscardDraft():Promise<service.ImportResult>;
 

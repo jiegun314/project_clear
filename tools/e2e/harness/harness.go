@@ -174,7 +174,7 @@ func Run(opt Options) error {
 	r.mark("Local 数据集可查询: %d 行", localGrid.Total)
 
 	// ---- integrate -----------------------------------------------------
-	entry, had, wasExpired, err := svc.Commit()
+	entry, had, wasExpired, err := svc.Commit(mps.MaxWeekColumns)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
@@ -263,7 +263,7 @@ func Run(opt Options) error {
 	}
 	r.mark("重复导入: 只有整合标记为已过期，Global/Local 显示当前版本")
 
-	again, hadAgain, expiredAgain, err := svc.Commit()
+	again, hadAgain, expiredAgain, err := svc.Commit(mps.MaxWeekColumns)
 	if err != nil {
 		return fmt.Errorf("re-commit: %w", err)
 	}

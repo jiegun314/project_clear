@@ -10,8 +10,8 @@ export function ClearLogs() {
   return window['go']['main']['App']['ClearLogs']();
 }
 
-export function Commit() {
-  return window['go']['main']['App']['Commit']();
+export function Commit(arg1) {
+  return window['go']['main']['App']['Commit'](arg1);
 }
 
 export function DiscardDraft() {

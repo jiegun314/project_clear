@@ -61,7 +61,12 @@ export interface AppActions {
   runImport: (kind: 'import' | 'add') => Promise<void>;
   runFinishGlobal: () => Promise<void>;
   runImportLocal: () => Promise<void>;
-  runCommit: () => Promise<void>;
+  /** Opens the range dialog; the actual commit happens in confirmMerge. */
+  runCommit: () => void;
+  mergeOpen: boolean;
+  mergeWeeks: number;
+  closeMerge: () => void;
+  confirmMerge: (weeks: number) => Promise<void>;
   runExport: (datasetId?: number, mode?: string) => Promise<ExportResult | null>;
   runToolbarExport: () => Promise<void>;
   /** 清空: discard the open Global draft only. */
@@ -113,6 +118,8 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
   const [historyLoading, setHistoryLoading] = useState(false);
   // The dataset the grid should show. 0 means "follow the backend default".
   const [selectedDataset, setSelectedDataset] = useState(0);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeWeeks, setMergeWeeks] = useState(26);
   const [lastEvent, setLastEvent] = useState<LastEvent>({ kind: 'none' });
   const [summary, setSummary] = useState<AppActions['summary']>({
     open: false,
@@ -223,16 +230,29 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     }
   };
 
-  const runCommit = async () => {
+  const runCommit = () => {
+    const st = backend.status;
+    if (!st?.hasGlobal || !st.hasLocal || st.hasDraft) return;
+    tasks.setNotice(null);
+    setMergeOpen(true);
+  };
+
+  const closeMerge = () => setMergeOpen(false);
+
+  const confirmMerge = async (weeks: number) => {
+    setMergeOpen(false);
+    setMergeWeeks(weeks);
     tasks.begin('整合', 0, 2);
     let ok = false;
     try {
-      const r: CommitResult = await api.commit();
+      const r: CommitResult = await api.commit(weeks);
       ok = true;
       setSelectedDataset(r.mergedId);
-      showSummary(`周码 ${r.weekCode} 已整合入库`, [
+      const warnings = r.warnings ?? [];
+      const items: SummaryItem[] = [
         { label: '周码', value: `${r.weekCode}（${r.weekStart}）`, strong: true },
         { label: '整合数据', value: `${r.mergedRows.toLocaleString()} 行`, strong: true },
+        { label: '整合范围', value: `截止 ${r.requestedWeeks} 周（实际 ${r.mergedWeeks} 周）` },
         { label: 'Global', value: `v${r.globalVersion} · ${r.globalRows.toLocaleString()} 行` },
         { label: 'Local', value: `v${r.localVersion} · ${r.localRows.toLocaleString()} 行` },
         { label: '文件数', value: String(r.fileCount) },
@@ -241,7 +261,15 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
           value: r.wasExpired ? '已把过期的整合更新为最新版本' : r.overwrote ? '已覆盖原有整合' : '本周此前没有整合',
         },
         { label: '整合时间', value: r.committedAt },
-      ]);
+      ];
+      if (warnings.length) {
+        items.push({ label: '范围提示', value: warnings.join('；') });
+      }
+      showSummary(
+        warnings.length ? `周码 ${r.weekCode} 已整合（范围已按交集调整）` : `周码 ${r.weekCode} 已整合入库`,
+        items,
+        warnings.length ? 'neutral' : 'success',
+      );
       await backend.afterChange();
     } catch (e) {
       tasks.setNotice({ type: 'error', text: errorText(e) });
@@ -421,6 +449,10 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     runFinishGlobal,
     runImportLocal,
     runCommit,
+    mergeOpen,
+    mergeWeeks,
+    closeMerge,
+    confirmMerge,
     runExport,
     runToolbarExport,
     runDiscardDraft,

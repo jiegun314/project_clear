@@ -93,16 +93,16 @@ func TestBoundPayloadFieldNamesArePinned(t *testing.T) {
 		{"Status", view.Status{}, []string{
 			"activeWeek", "archivedRows", "archivedWeeks", "canDiscardWeek", "database",
 			"draftFailed", "draftFiles", "draftId", "draftRows", "draftWeek", "exportMode",
-			"globalAt", "globalFiles", "globalId", "globalRows", "globalVersion", "globalWeek",
+			"globalAt", "globalFiles", "globalId", "globalRows", "globalVersion", "globalWeek", "globalWeeks",
 			"hasDraft", "hasGlobal", "hasIntegration", "hasLocal", "headerDisplay",
 			"integrationAt", "integrationExpired", "integrationId", "integrationRows",
 			"integrationWeek", "lastAction", "locFilter", "localAt", "localFileName", "localFiles",
-			"localId", "localRows", "localVersion", "localWeek", "pageSize", "readColumns",
+			"localId", "localRows", "localVersion", "localWeek", "localWeeks", "pageSize", "readColumns",
 			"unintegrated"}},
 		{"CommitResult", view.CommitResult{}, []string{
 			"committedAt", "fileCount", "globalId", "globalRows", "globalVersion", "localId",
-			"localRows", "localVersion", "mergedId", "mergedRows", "mergedVersion", "overwrote",
-			"wasExpired", "weekCode", "weekStart"}},
+			"localRows", "localVersion", "mergedId", "mergedRows", "mergedVersion", "mergedWeeks",
+			"overwrote", "requestedWeeks", "warnings", "wasExpired", "weekCode", "weekStart"}},
 		{"FilesView", view.NewFilesView(), []string{"failedCount", "fileCount", "files", "hasDraft", "rowCount"}},
 		{"DiscardWeekResult", view.DiscardWeekResult{}, []string{"datasets", "weekCode"}},
 		{"ExportResult", view.ExportResult{}, []string{

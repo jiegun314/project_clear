@@ -617,7 +617,7 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 
 // Commit combines the current Global and Local datasets into the week's
 // integration. 整合 is the only place the two inputs are joined.
-func (s *Service) Commit() (*store.IntegrationResult, bool, bool, error) {
+func (s *Service) Commit(weekLimit int) (*store.IntegrationResult, bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -640,15 +640,19 @@ func (s *Service) Commit() (*store.IntegrationResult, bool, bool, error) {
 	}
 	had := ws.Integration != nil
 	wasExpired := ws.Expired
-	res, err := s.db.Integrate(ws.Week)
+	res, err := s.db.Integrate(ws.Week, weekLimit)
 	if err != nil {
 		s.log.Error("整合", "失败: %v", err)
 		return nil, false, false, err
 	}
 	s.activateLocked(ws.Week)
-	s.log.Success("整合", "周码 %s 已整合：合并 %d 行，Global v%d（%d 行），Local v%d（%d 行）%s",
-		ws.Week, res.Merged.RowCount, res.Global.Version, res.Global.RowCount,
-		res.Local.Version, res.Local.RowCount, map[bool]string{true: "（覆盖原有整合）", false: ""}[had])
+	for _, warning := range res.Warnings {
+		s.log.Warn("整合", "%s", warning)
+	}
+	s.log.Success("整合", "周码 %s 已整合：截止 %d 周，实际 %d 周，合并 %d 行，Global v%d（%d 行），Local v%d（%d 行）%s",
+		ws.Week, res.RequestedWeeks, res.MergedWeeks, res.Merged.RowCount,
+		res.Global.Version, res.Global.RowCount, res.Local.Version, res.Local.RowCount,
+		map[bool]string{true: "（覆盖原有整合）", false: ""}[had])
 	return res, had, wasExpired, nil
 }
 
@@ -1126,15 +1130,29 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 	if err != nil {
 		return nil, err
 	}
+	merged, err := s.db.Dataset(in.MergedID)
+	if err != nil {
+		return nil, err
+	}
+	if merged == nil {
+		return nil, fmt.Errorf("周码 %s 的整合数据不存在", week)
+	}
+	targetWeeks := parseWeekCodes(merged.WeekCodes)
 	sheets := make([]mps.BundleSheet, 0, 3)
 	for _, p := range parts {
 		d, rows, err := s.db.ExportRows(p.id)
 		if err != nil {
 			return nil, err
 		}
+		var bundleRows []mps.ExportRow
+		if p.id == in.MergedID {
+			bundleRows = toMPSRows(rows)
+		} else {
+			bundleRows = trimExportRows(rows, parseWeekCodes(d.WeekCodes), targetWeeks)
+		}
 		sheets = append(sheets, mps.BundleSheet{
-			Name: p.sheet, Weeks: parseWeekCodes(d.WeekCodes),
-			IndexNames: d.IndexNames, Rows: toMPSRows(rows), StyleByID: styles,
+			Name: p.sheet, Weeks: targetWeeks,
+			IndexNames: d.IndexNames, Rows: bundleRows, StyleByID: styles,
 		})
 	}
 	if progress != nil {
@@ -1315,6 +1333,69 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, b, 0o644)
+}
+
+// trimExportRows keeps only the weeks selected by the integration, so the Local
+// and Global sheets have the same week columns as the merged MPS sheet. Values,
+// styles, conditional colours and comments follow the weeks they belong to.
+func trimExportRows(rows []store.ExportRow, from, to []mps.Week) []mps.ExportRow {
+	at := map[string]int{}
+	for i, w := range from {
+		at[w.Code] = i
+	}
+	out := make([]mps.ExportRow, 0, len(rows))
+	for _, r := range rows {
+		nr := mps.ExportRow{
+			Index: r.Index, Weeks: make([]any, len(to)), CF: r.CF,
+			SourceRow: r.SourceRow, FileName: r.FileName,
+		}
+		if len(r.StyleIDs) > 0 {
+			nr.StyleIDs = make([]int, mps.IndexCols+len(to))
+			copy(nr.StyleIDs, r.StyleIDs[:minInt(len(r.StyleIDs), mps.IndexCols)])
+		}
+		if len(r.CFColors) > 0 {
+			nr.CFColors = make([]string, len(to))
+		}
+		if len(r.Comments) > 0 {
+			nr.Comments = mps.CommentMap{}
+			for col, c := range r.Comments {
+				if col <= mps.IndexCols {
+					nr.Comments[col] = c
+				}
+			}
+		}
+		for i, w := range to {
+			j, ok := at[w.Code]
+			if !ok {
+				continue
+			}
+			if j < len(r.Weeks) {
+				nr.Weeks[i] = r.Weeks[j]
+			}
+			if nr.StyleIDs != nil {
+				if k := mps.IndexCols + j; k < len(r.StyleIDs) {
+					nr.StyleIDs[mps.IndexCols+i] = r.StyleIDs[k]
+				}
+			}
+			if nr.CFColors != nil && j < len(r.CFColors) {
+				nr.CFColors[i] = r.CFColors[j]
+			}
+			if len(r.Comments) > 0 {
+				if c, ok := r.Comments[mps.IndexCols+1+j]; ok {
+					nr.Comments[mps.IndexCols+1+i] = c
+				}
+			}
+		}
+		out = append(out, nr)
+	}
+	return out
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func toMPSRows(rows []store.ExportRow) []mps.ExportRow {

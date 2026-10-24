@@ -108,12 +108,12 @@ func (a *App) ImportLocalMPS() (out *service.ImportResult, err error) {
 
 // Commit combines the current Global and Local datasets into the week's
 // integration.
-func (a *App) Commit() (out *view.CommitResult, err error) {
+func (a *App) Commit(weekLimit int) (out *view.CommitResult, err error) {
 	defer a.recoverFault("Commit", &err)
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	res, had, wasExpired, err := a.svc.Commit()
+	res, had, wasExpired, err := a.svc.Commit(weekLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +124,7 @@ func (a *App) Commit() (out *view.CommitResult, err error) {
 		MergedVer: res.Merged.Version, GlobalVer: res.Global.Version, LocalVer: res.Local.Version,
 		FileCount: res.Merged.FileCount, CommittedAt: res.Integration.IntegratedAt,
 		Overwrote: had, WasExpired: wasExpired,
+		RequestedWeeks: res.RequestedWeeks, MergedWeeks: res.MergedWeeks, Warnings: res.Warnings,
 	}, nil
 }
 

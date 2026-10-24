@@ -106,6 +106,11 @@ func (f *FileResult) warn(format string, args ...any) {
 	f.Warnings = append(f.Warnings, fmt.Sprintf(format, args...))
 }
 
+// MaxWeekColumns is the widest week block the business copies: P through BX.
+// The integration step can cut this back to 26 (AO) or 61 (BX); the reader has
+// to keep the full range so the choice remains possible after import.
+const MaxWeekColumns = 61
+
 // ReadOptions controls what a read keeps.
 type ReadOptions struct {
 	// LOCFilter is the value required in column L.

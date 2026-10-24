@@ -49,7 +49,9 @@ type Config struct {
 	// ConfigVersion is the schema marker used to bring an older settings file
 	// forward exactly once.
 	ConfigVersion int `yaml:"configVersion" json:"configVersion"`
-	// ReadColumns is how many week columns to read starting at column P.
+	// ReadColumns is how many week columns to read starting at column P. It is
+	// at least 61 (P through BX) so the integration cutoff (AO/BX) can be chosen
+	// after import.
 	ReadColumns int `yaml:"readColumns" json:"readColumns"`
 	// LOCFilter is the value required in the LOC column (column L) for a row
 	// to be kept.
@@ -68,13 +70,15 @@ type Config struct {
 // existing settings file should follow.
 //
 // v2: the default export mode became 纯数据 (clean).
-const currentConfigVersion = 2
+// v3: the default read range grew to 61 weeks (P through BX) for the AO/BX
+// integration cutoff.
+const currentConfigVersion = 3
 
 // Default returns the built-in parameter set, matching the specification.
 func Default() Config {
 	return Config{
 		ConfigVersion: currentConfigVersion,
-		ReadColumns:   20,
+		ReadColumns:   61,
 		LOCFilter:     "WH_CNB",
 		PageSize:      200,
 		HeaderDisplay: HeaderTwoRow,
@@ -85,9 +89,9 @@ func Default() Config {
 // Validate clamps values into sane ranges and reports what it had to fix.
 func (c *Config) Validate() []string {
 	var notes []string
-	if c.ReadColumns < 1 || c.ReadColumns > 200 {
-		notes = append(notes, fmt.Sprintf("读取列数 %d 超出范围，已重置为 20", c.ReadColumns))
-		c.ReadColumns = 20
+	if c.ReadColumns < 61 || c.ReadColumns > 200 {
+		notes = append(notes, fmt.Sprintf("读取列数 %d 超出范围，已重置为 61（覆盖 P–BX）", c.ReadColumns))
+		c.ReadColumns = 61
 	}
 	if c.PageSize < 10 || c.PageSize > 5000 {
 		notes = append(notes, fmt.Sprintf("每页行数 %d 超出范围，已重置为 200", c.PageSize))
@@ -221,6 +225,13 @@ func migrateConfig(c *Config) (string, bool) {
 	if c.ConfigVersion < 2 && c.ExportMode == ExportTemplate {
 		c.ExportMode = ExportClean
 		note = "导出方式默认值已改为「纯数据」，可在参数设定中改回「原文件格式」"
+	}
+	if c.ConfigVersion < 3 && c.ReadColumns < 61 {
+		c.ReadColumns = 61
+		if note != "" {
+			note += "；"
+		}
+		note += "读取列数已提升到 61（覆盖 P–BX），整合时可选择截止 AO 或 BX"
 	}
 	c.ConfigVersion = currentConfigVersion
 	return note, true

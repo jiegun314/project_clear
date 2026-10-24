@@ -25,7 +25,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 	if got := store.Get().ExportMode; got != ExportClean {
 		t.Errorf("export mode = %q, want %q", got, ExportClean)
 	}
-	if !mentions(notes, "纯数据") {
+	if !mentions(notes, "纯数据") || !mentions(notes, "61") {
 		t.Errorf("the change should be reported, notes = %v", notes)
 	}
 	// The upgraded file is persisted, so the next start is a no-op.
@@ -33,7 +33,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 2") || !strings.Contains(string(raw), "exportMode: clean") {
+	if !strings.Contains(string(raw), "configVersion: 3") || !strings.Contains(string(raw), "exportMode: clean") {
 		t.Errorf("upgraded file = %s", raw)
 	}
 
@@ -41,7 +41,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 	if _, _, err := NewStoreAt(dir); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if _, err := store.Save(Config{ConfigVersion: currentConfigVersion, ReadColumns: 20, PageSize: 200,
+	if _, err := store.Save(Config{ConfigVersion: currentConfigVersion, ReadColumns: 61, PageSize: 200,
 		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, LOCFilter: "WH_CNB"}); err != nil {
 		t.Fatal(err)
 	}

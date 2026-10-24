@@ -143,6 +143,9 @@ export interface CommitResult {
   committedAt: string;
   overwrote: boolean;
   wasExpired: boolean;
+  requestedWeeks: number;
+  mergedWeeks: number;
+  warnings: string[];
 }
 
 export interface DiscardWeekResult {
@@ -220,6 +223,7 @@ export interface Status {
   globalFiles: number;
   globalVersion: number;
   globalAt: string;
+  globalWeeks: number;
 
   hasLocal: boolean;
   localId: number;
@@ -228,6 +232,7 @@ export interface Status {
   localFiles: number;
   localVersion: number;
   localAt: string;
+  localWeeks: number;
   localFileName: string;
 
   hasIntegration: boolean;

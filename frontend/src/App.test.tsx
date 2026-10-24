@@ -33,21 +33,21 @@ const mocked = vi.mocked(api);
 const mockedHasBackend = vi.mocked(hasBackend);
 
 const CONFIG: AppConfig = {
-  configVersion: 2, readColumns: 20, locFilter: 'WH_CNB', pageSize: 200,
+  configVersion: 3, readColumns: 61, locFilter: 'WH_CNB', pageSize: 200,
   headerDisplay: 'twoRow', exportMode: 'clean', exportDir: '',
 };
 
 const STATUS: Status = {
   hasDraft: false, draftId: 0, draftWeek: '', draftRows: 0, draftFiles: 0, draftFailed: 0,
   hasGlobal: true, globalId: 11, globalWeek: '2639', globalRows: 1516, globalFiles: 13,
-  globalVersion: 2, globalAt: '2026-09-22 09:00:00',
+  globalVersion: 2, globalAt: '2026-09-22 09:00:00', globalWeeks: 26,
   hasLocal: true, localId: 12, localWeek: '2639', localRows: 1736, localFiles: 1,
-  localVersion: 1, localAt: '2026-09-22 10:00:00', localFileName: 'local.xlsx',
+  localVersion: 1, localAt: '2026-09-22 10:00:00', localWeeks: 26, localFileName: 'local.xlsx',
   hasIntegration: false, integrationId: 0, integrationWeek: '', integrationRows: 0,
   integrationAt: '', integrationExpired: false,
   activeWeek: '2639', unintegrated: true, canDiscardWeek: true,
   archivedWeeks: 0, archivedRows: 0,
-  readColumns: 20, locFilter: 'WH_CNB', pageSize: 200, headerDisplay: 'twoRow',
+  readColumns: 61, locFilter: 'WH_CNB', pageSize: 200, headerDisplay: 'twoRow',
   exportMode: 'clean', database: '/tmp/clear.db', lastAction: '',
 };
 
@@ -102,7 +102,7 @@ const COMMIT_RESULT: CommitResult = {
   weekCode: '2639', weekStart: '2026-09-21', mergedId: 100, globalId: 11, localId: 12,
   mergedRows: 2580, globalRows: 1516, localRows: 1736, globalVersion: 2, localVersion: 1,
   mergedVersion: 1, fileCount: 14, committedAt: '2026-09-22 11:00:00', overwrote: false,
-  wasExpired: false,
+  wasExpired: false, requestedWeeks: 26, mergedWeeks: 26, warnings: [],
 };
 
 const EXPORT_RESULT: ExportResult = {
@@ -234,16 +234,33 @@ describe('App', () => {
     await waitFor(() => expect(mocked.finishGlobalMPS).toHaveBeenCalledWith(true));
   });
 
-  it('integrates completed inputs and reports the three counts', async () => {
+  it('asks for the range and integrates completed inputs', async () => {
     await renderApp();
     const commit = screen.getByRole('button', { name: COMMIT });
     expect(commit.hasAttribute('disabled')).toBe(false);
     fireEvent.click(commit);
-    await waitFor(() => expect(mocked.commit).toHaveBeenCalled());
+    expect(await screen.findByText('选择本次整合的截止范围')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '开始整合' }));
+    await waitFor(() => expect(mocked.commit).toHaveBeenCalledWith(26));
     expect(await screen.findByText('周码 2639 已整合入库')).toBeTruthy();
     expect(screen.getAllByText('2,580 行').length).toBeGreaterThan(0);
     expect(screen.getAllByText('v2 · 1,516 行').length).toBeGreaterThan(0);
     expect(screen.getAllByText('v1 · 1,736 行').length).toBeGreaterThan(0);
+  });
+
+  it('can choose BX and reports a shortened intersection', async () => {
+    mocked.commit.mockResolvedValue({
+      ...COMMIT_RESULT,
+      requestedWeeks: 61, mergedWeeks: 26,
+      warnings: ['选择截止 61 周：Global 提供 26 周，Local 提供 26 周，实际按交集整合 26 周。'],
+    });
+    await renderApp();
+    fireEvent.click(screen.getByRole('button', { name: COMMIT }));
+    fireEvent.click(await screen.findByText('BX：截止到第 61 个周列（扩展）'));
+    fireEvent.click(screen.getByRole('button', { name: '开始整合' }));
+    await waitFor(() => expect(mocked.commit).toHaveBeenCalledWith(61));
+    expect(await screen.findByText(/范围已按交集调整/)).toBeTruthy();
+    expect(screen.getByText(/实际按交集整合 26 周/)).toBeTruthy();
   });
 
   it('disables 整合 while a draft is open', async () => {

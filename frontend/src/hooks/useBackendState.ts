@@ -5,7 +5,7 @@ import type { AppConfig, FilesView, Status } from '../types';
 /** Used until the backend answers, so the first paint has something to render. */
 const DEFAULT_CONFIG: AppConfig = {
   configVersion: 2,
-  readColumns: 20,
+  readColumns: 61,
   locFilter: 'WH_CNB',
   pageSize: 200,
   headerDisplay: 'twoRow',

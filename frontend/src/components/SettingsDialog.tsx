@@ -185,15 +185,15 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
       <Form layout="vertical" size="middle">
         <Section first>
           <Form.Item
-            label="读取列数（从 P 列开始）"
-            extra="源文件第 55/56 行的周码与起始日期列数，默认 20，即 P..AI"
+            label="读取列数（从 P 列开始，至少 61）"
+            extra="默认 61，覆盖 P..BX；整合时可再选择截止 AO（26 周）或 BX（61 周）"
             style={{ marginBottom: 0 }}
           >
             <InputNumber
-              min={1}
+              min={61}
               max={200}
               value={cfg.readColumns}
-              onChange={(v) => setCfg({ ...cfg, readColumns: v ?? 20 })}
+              onChange={(v) => setCfg({ ...cfg, readColumns: v ?? 61 })}
               style={{ width: '100%' }}
             />
           </Form.Item>

@@ -41,6 +41,7 @@ type Status struct {
 	GlobalFiles   int    `json:"globalFiles"`
 	GlobalVersion int    `json:"globalVersion"`
 	GlobalAt      string `json:"globalAt"`
+	GlobalWeeks   int    `json:"globalWeeks"`
 
 	HasLocal     bool   `json:"hasLocal"`
 	LocalID      int64  `json:"localId"`
@@ -49,6 +50,7 @@ type Status struct {
 	LocalFiles   int    `json:"localFiles"`
 	LocalVersion int    `json:"localVersion"`
 	LocalAt      string `json:"localAt"`
+	LocalWeeks   int    `json:"localWeeks"`
 	// LocalFileName is the single Local workbook, shown in the status strip:
 	// Local has no per-file list because one import is the whole dataset.
 	LocalFileName string `json:"localFileName"`
@@ -95,6 +97,11 @@ type CommitResult struct {
 	CommittedAt string `json:"committedAt"`
 	Overwrote   bool   `json:"overwrote"`
 	WasExpired  bool   `json:"wasExpired"`
+	// RequestedWeeks is the selected cutoff (26 = AO, 61 = BX); MergedWeeks is
+	// what survived the Global/Local intersection.
+	RequestedWeeks int      `json:"requestedWeeks"`
+	MergedWeeks    int      `json:"mergedWeeks"`
+	Warnings       []string `json:"warnings"`
 }
 
 // DiscardWeekResult reports 丢弃本周导入.

@@ -757,13 +757,24 @@ type IntegrationResult struct {
 	Global      *Dataset
 	Local       *Dataset
 	Merged      *Dataset
+	// RequestedWeeks is the selected cutoff (26 for AO, 61 for BX).
+	RequestedWeeks int
+	// MergedWeeks is the number of weeks that survived the cutoff and the
+	// Global/Local week-code intersection.
+	MergedWeeks int
+	// Warnings explains a shortened range; the caller shows it in a dialog and
+	// writes it to the log.
+	Warnings []string
 }
 
 // Integrate combines the current Global and Local datasets of a week into a
 // merged dataset and a new integration row. It never modifies the inputs.
-func (s *Store) Integrate(week string) (*IntegrationResult, error) {
+func (s *Store) Integrate(week string, weekLimit int) (*IntegrationResult, error) {
 	if _, err := mustWeek(week); err != nil {
 		return nil, err
+	}
+	if weekLimit <= 0 || weekLimit > mps.MaxWeekColumns {
+		weekLimit = mps.MaxWeekColumns
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -800,9 +811,22 @@ func (s *Store) Integrate(week string) (*IntegrationResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	header := mps.Header{IndexNames: global.IndexNames, Weeks: parseWeeks(global.WeekCodes)}
+	globalAvailable := len(global.WeekCodes)
+	localAvailable := len(local.WeekCodes)
+	globalCodes := global.WeekCodes
+	if len(globalCodes) > weekLimit {
+		globalCodes = globalCodes[:weekLimit]
+	}
+	localCodes := local.WeekCodes
+	if len(localCodes) > weekLimit {
+		localCodes = localCodes[:weekLimit]
+	}
+	globalRows = trimStagedRows(globalRows, weekLimit)
+	localRows = trimStagedRows(localRows, weekLimit)
+	header := mps.Header{IndexNames: global.IndexNames, Weeks: parseWeeks(globalCodes)}
+	localHeader := mps.Header{IndexNames: local.IndexNames, Weeks: parseWeeks(localCodes)}
 	localSheet := &mps.LocalSheet{
-		Header:    header,
+		Header:    localHeader,
 		Rows:      toMPSRows(localRows),
 		RowsTotal: len(localRows),
 		RowsKept:  len(localRows),
@@ -811,16 +835,26 @@ func (s *Store) Integrate(week string) (*IntegrationResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	warnings := []string{}
+	if globalAvailable < weekLimit || localAvailable < weekLimit || len(merged.Header.Weeks) < weekLimit {
+		warnings = append(warnings, fmt.Sprintf(
+			"选择截止 %d 周：Global 提供 %d 周，Local 提供 %d 周，实际按交集整合 %d 周。",
+			weekLimit, globalAvailable, localAvailable, len(merged.Header.Weeks)))
+	}
 	localName, err := datasetFirstNameTx(tx, local.ID)
 	if err != nil {
 		return nil, err
 	}
-	mergedRows := stagedRowsFromMerge(merged.AlignedTo(header.Weeks), merged.Sources, globalRows, localName)
+	mergedRows := stagedRowsFromMerge(merged.Rows, merged.Sources, globalRows, localName)
 	version, err := nextVersionTx(tx, week, DatasetMerged)
 	if err != nil {
 		return nil, err
 	}
-	weekCodesJSON, _ := json.Marshal(global.WeekCodes)
+	mergedCodes := make([]string, len(merged.Header.Weeks))
+	for i, w := range merged.Header.Weeks {
+		mergedCodes[i] = w.Code
+	}
+	weekCodesJSON, _ := json.Marshal(mergedCodes)
 	indexNamesJSON, _ := json.Marshal(global.IndexNames)
 	// One timestamp for the merged dataset and the integration row: history
 	// shows the dataset's own creation time, and it has to agree with the
@@ -879,11 +913,34 @@ func (s *Store) Integrate(week string) (*IntegrationResult, error) {
 	out := &IntegrationResult{Global: global, Local: local, Merged: &Dataset{
 		ID: mergedID, WeekCode: week, WeekStart: global.WeekStart, Kind: DatasetMerged,
 		Version: version, Status: DatasetReady, RowCount: len(mergedRows),
-		FileCount: global.FileCount + local.FileCount, WeekCodes: global.WeekCodes,
+		FileCount: global.FileCount + local.FileCount, WeekCodes: mergedCodes,
 		IndexNames: global.IndexNames, ImportedAt: integratedAt, Params: global.Params,
-	}}
+	}, RequestedWeeks: weekLimit, MergedWeeks: len(mergedCodes), Warnings: warnings}
 	out.Integration, err = s.Integration(week)
 	return out, err
+}
+
+// trimStagedRows applies the integration cutoff to one input. The rows keep
+// only the first weekLimit week values, their aligned style/CF-colour entries,
+// and comments that still point inside the kept columns.
+func trimStagedRows(rows []StagedRow, weekLimit int) []StagedRow {
+	for i := range rows {
+		if len(rows[i].Weeks) > weekLimit {
+			rows[i].Weeks = rows[i].Weeks[:weekLimit]
+		}
+		if len(rows[i].StyleIDs) > mps.IndexCols+weekLimit {
+			rows[i].StyleIDs = rows[i].StyleIDs[:mps.IndexCols+weekLimit]
+		}
+		if len(rows[i].CFColors) > weekLimit {
+			rows[i].CFColors = rows[i].CFColors[:weekLimit]
+		}
+		for col := range rows[i].Comments {
+			if col > mps.IndexCols+weekLimit {
+				delete(rows[i].Comments, col)
+			}
+		}
+	}
+	return rows
 }
 
 func scanDraftTx(q sqlQueryer) (*Dataset, error) {

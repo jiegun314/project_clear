@@ -20,7 +20,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	}
 	// A client that echoes an empty marker, as an older webview would.
 	if _, err := store.Save(Config{
-		ConfigVersion: 0, ReadColumns: 20, PageSize: 200,
+		ConfigVersion: 0, ReadColumns: 61, PageSize: 200,
 		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, LOCFilter: "WH_CNB",
 	}); err != nil {
 		t.Fatalf("save: %v", err)
@@ -30,7 +30,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 2") {
+	if !strings.Contains(string(raw), "configVersion: 3") {
 		t.Errorf("the marker was not stamped: %s", raw)
 	}
 
@@ -65,8 +65,8 @@ func TestLoadPersistsValidationCorrections(t *testing.T) {
 	if len(notes) == 0 {
 		t.Fatal("the corrections were not reported")
 	}
-	if got := store.Get().ReadColumns; got != 20 {
-		t.Errorf("readColumns = %d, want the clamped 20", got)
+	if got := store.Get().ReadColumns; got != 61 {
+		t.Errorf("readColumns = %d, want the clamped 61", got)
 	}
 	if got := store.Get().PageSize; got != 200 {
 		t.Errorf("pageSize = %d, want the clamped 200", got)
@@ -83,7 +83,7 @@ func TestLoadPersistsValidationCorrections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"readColumns: 20", "pageSize: 200", "locFilter: WH_CNB"} {
+	for _, want := range []string{"readColumns: 61", "pageSize: 200", "locFilter: WH_CNB"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("corrected file is missing %q:\n%s", want, raw)
 		}
@@ -109,8 +109,8 @@ func TestSavePersistsTheCorrectionsItReports(t *testing.T) {
 	if len(notes) == 0 {
 		t.Fatal("no corrections were reported")
 	}
-	if got := store.Get().ReadColumns; got != 20 {
-		t.Errorf("active readColumns = %d, want 20", got)
+	if got := store.Get().ReadColumns; got != 61 {
+		t.Errorf("active readColumns = %d, want 61", got)
 	}
 
 	again, notes, err := NewStoreAt(dir)
@@ -161,7 +161,7 @@ func TestVersionMigrationWithoutAChangeReportsNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clear.yaml")
 	// A file written before the marker existed, already holding the new default.
-	if err := os.WriteFile(path, []byte("readColumns: 20\nexportMode: clean\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("readColumns: 61\nexportMode: clean\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

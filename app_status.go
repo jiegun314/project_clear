@@ -62,6 +62,7 @@ func (a *App) GetStatus() (out *view.Status, err error) {
 		st.GlobalFiles = ws.Global.FileCount
 		st.GlobalVersion = ws.Global.Version
 		st.GlobalAt = ws.Global.ImportedAt
+		st.GlobalWeeks = len(ws.Global.WeekCodes)
 	}
 	if ws.Local != nil {
 		st.HasLocal = true
@@ -71,6 +72,7 @@ func (a *App) GetStatus() (out *view.Status, err error) {
 		st.LocalFiles = ws.Local.FileCount
 		st.LocalVersion = ws.Local.Version
 		st.LocalAt = ws.Local.ImportedAt
+		st.LocalWeeks = len(ws.Local.WeekCodes)
 		if files, err := a.db.DatasetFiles(ws.Local.ID); err == nil {
 			for _, f := range files {
 				if f.Status == "ok" {
