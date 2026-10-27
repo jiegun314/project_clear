@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Select, Button, Empty, Tag, Tooltip } from 'antd';
-import { History, ArrowRight } from 'lucide-react';
+import { History } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
 import type { ArchiveEntry } from '../types';
@@ -196,6 +196,7 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
         >
           <Button
             type="primary"
+            autoInsertSpace={false}
             disabled={!known || !target}
             onClick={() => target && onActivate(target.weekCode)}
             style={{
@@ -205,10 +206,7 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
               paddingInline: 10,
             }}
           >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              打开
-              <ArrowRight size={13} />
-            </span>
+            加载
           </Button>
         </Tooltip>
       </div>
