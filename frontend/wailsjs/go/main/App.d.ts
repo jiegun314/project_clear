@@ -6,6 +6,8 @@ import {logging} from '../models';
 import {store} from '../models';
 import {config} from '../models';
 
+export function ActivateWeek(arg1:string):Promise<void>;
+
 export function AddFiles():Promise<service.ImportResult>;
 
 export function ClearLogs():Promise<void>;

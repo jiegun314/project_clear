@@ -67,6 +67,8 @@ export interface AppActions {
   mergeWeeks: number;
   closeMerge: () => void;
   confirmMerge: (weeks: number) => Promise<void>;
+  /** Reopen a persisted week in the workbench from history. */
+  runActivateWeek: (weekCode: string) => Promise<void>;
   runExport: (datasetId?: number, mode?: string) => Promise<ExportResult | null>;
   /** Three-table export for a week (toolbar and the merged history row). */
   runExportBundle: (weekCode?: string) => Promise<ExportResult | null>;
@@ -305,6 +307,44 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     showSummary(r.sheets === 3 ? '三表文件已导出' : '数据已导出', items, r.expired ? 'neutral' : 'success');
   };
 
+  const runActivateWeek = async (weekCode: string): Promise<void> => {
+    if (!weekCode) return;
+    const st = backend.status;
+    if (st?.hasDraft && st.draftWeek && st.draftWeek !== weekCode) {
+      Modal.warning({
+        title: '先完成当前 Global 导入',
+        content: `当前还有周码 ${st.draftWeek} 的 Global 草稿；请先完成导入或清空草稿，再切换到其他周。`,
+        okText: '知道了',
+      });
+      return;
+    }
+    const activate = async () => {
+      try {
+        await api.activateWeek(weekCode);
+        setSelectedDataset(0);
+        await backend.afterChange();
+      } catch (e) {
+        tasks.setNotice({ type: 'error', text: errorText(e) });
+      }
+    };
+    if (
+      st?.unintegrated &&
+      st.activeWeek &&
+      st.activeWeek !== weekCode &&
+      !st.hasDraft
+    ) {
+      Modal.confirm({
+        title: '切换当前工作周？',
+        content: `当前周码 ${st.activeWeek} 还有未整合数据。切换不会删除这些数据，之后仍可从历史继续处理。`,
+        okText: '切换',
+        cancelText: '取消',
+        onOk: activate,
+      });
+      return;
+    }
+    await activate();
+  };
+
   const runExport = async (datasetId?: number, mode = ''): Promise<ExportResult | null> => {
     if (!datasetId) return null;
     tasks.begin('导出', 0, 2);
@@ -461,6 +501,7 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     mergeWeeks,
     closeMerge,
     confirmMerge,
+    runActivateWeek,
     runExport,
     runExportBundle,
     runToolbarExport,

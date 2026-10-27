@@ -568,3 +568,49 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+func TestActivateWeekRestoresCompletedInputsForIntegration(t *testing.T) {
+	s := newTestService(t)
+	addGlobal(t, s, testRow("A", "100"))
+	addLocal(t, s, testRow("B", "200"))
+	// Simulate closing the program and starting a new session.
+	s.sessionActive = false
+	s.activeWeek = ""
+
+	ws, err := s.ActivateWeek("2639")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.Week != "2639" || ws.Global == nil || ws.Local == nil || ws.Integration != nil || !ws.Unintegrated {
+		t.Fatalf("workspace = %+v", ws)
+	}
+	res, _, _, err := s.Commit(1)
+	if err != nil {
+		t.Fatalf("commit after activation: %v", err)
+	}
+	if res.Merged.RowCount != 2 {
+		t.Fatalf("merged rows = %d", res.Merged.RowCount)
+	}
+}
+
+func TestActivateWeekBlocksWhenAnotherDraftExists(t *testing.T) {
+	s := newTestService(t)
+	d, err := s.db.BeginGlobalImport("2640", "2026-09-28", []string{"2640"}, testIndexNames, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.AddDraftData(d.ID, []store.StagedFile{{Path: "/in/a.xlsm", Name: "a.xlsm", Status: "ok", RowsKept: 1, WeekCode: "2640"}},
+		[]store.StagedRow{testRow("A", "100")}, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ActivateWeek("2639"); err == nil || !strings.Contains(err.Error(), "未完成的 Global 导入") {
+		t.Fatalf("activation error = %v", err)
+	}
+}
+
+func TestActivateWeekRefusesAnEmptyWeek(t *testing.T) {
+	s := newTestService(t)
+	if _, err := s.ActivateWeek("2640"); err == nil {
+		t.Fatal("expected an empty-week error")
+	}
+}

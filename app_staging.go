@@ -193,3 +193,19 @@ func (a *App) DiscardWeekImports(weekCode string) (out *view.DiscardWeekResult, 
 	}
 	return &view.DiscardWeekResult{WeekCode: weekCode, Datasets: n}, nil
 }
+
+// ActivateWeek reopens a persisted week in the workbench. It is the explicit
+// continuation path from history after a restart, not a fresh import.
+func (a *App) ActivateWeek(weekCode string) (err error) {
+	defer a.recoverFault("ActivateWeek", &err)
+	if err := a.ready(); err != nil {
+		return err
+	}
+	if weekCode == "" {
+		return fmt.Errorf("没有要打开的工作周")
+	}
+	if _, err := a.svc.ActivateWeek(weekCode); err != nil {
+		return err
+	}
+	return nil
+}

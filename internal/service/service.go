@@ -665,6 +665,61 @@ func (s *Service) StagingSummary() (*Workspace, error) {
 	return s.workspaceLocked()
 }
 
+// ActivateWeek makes a week with persisted data the current workbench again,
+// without re-reading any source workbook. It is the "继续本周" path from history:
+// completed Global/Local datasets and an existing integration are already in the
+// database, so the user can carry on editing, import the missing side, or press
+// 整合 immediately.
+//
+// An unfinished Global draft is the one thing that cannot be left behind: drafts
+// are not in history, so switching away would strand them invisibly. Completed
+// inputs are safe to leave for another week; they remain in the database.
+func (s *Service) ActivateWeek(week string) (*Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !store.ValidWeekCode(week) {
+		return nil, fmt.Errorf("非法周码 %q", week)
+	}
+	draft, err := s.db.Draft()
+	if err != nil {
+		return nil, err
+	}
+	if draft != nil && draft.WeekCode != week {
+		return nil, fmt.Errorf("当前还有未完成的 Global 导入（周码 %s），请先完成或清空后再切换", draft.WeekCode)
+	}
+	global, err := s.db.Current(week, store.DatasetGlobal)
+	if err != nil {
+		return nil, err
+	}
+	local, err := s.db.Current(week, store.DatasetLocal)
+	if err != nil {
+		return nil, err
+	}
+	integration, err := s.db.Integration(week)
+	if err != nil {
+		return nil, err
+	}
+	if draft == nil && global == nil && local == nil && integration == nil {
+		return nil, fmt.Errorf("周码 %s 没有可继续的数据", week)
+	}
+	s.activateLocked(week)
+	ws, err := s.workspaceLocked()
+	if err != nil {
+		return nil, err
+	}
+	s.log.Info("工作台", "已切换到周码 %s（Global %s / Local %s）", week,
+		datasetLabel(global), datasetLabel(local))
+	return ws, nil
+}
+
+func datasetLabel(d *store.Dataset) string {
+	if d == nil {
+		return "无"
+	}
+	return fmt.Sprintf("v%d %d 行", d.Version, d.RowCount)
+}
+
 // Workspace returns the current week's datasets and integration. On a fresh
 // launch it is empty: the workbench never reopens last session's imports.
 func (s *Service) Workspace() (*Workspace, error) {

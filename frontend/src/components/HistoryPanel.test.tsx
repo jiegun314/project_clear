@@ -37,7 +37,7 @@ beforeEach(() => {
 describe('HistoryPanel', () => {
   it('lists every dataset of a week and opens the one that is clicked', async () => {
     const onView = vi.fn();
-    render(<HistoryPanel onView={onView} reloadToken={0} />);
+    render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={0} />);
 
     expect(await screen.findByText('整合')).toBeTruthy();
     expect(screen.getByText('Global')).toBeTruthy();
@@ -53,7 +53,7 @@ describe('HistoryPanel', () => {
 
   it('opens the week\'s merged dataset from the 查看 button', async () => {
     const onView = vi.fn();
-    render(<HistoryPanel onView={onView} reloadToken={0} />);
+    render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={0} />);
     await screen.findByText('整合');
     fireEvent.click(screen.getByRole('button', { name: /查看/ }));
     await waitFor(() => expect(onView).toHaveBeenCalledWith(100, 'merged'));
@@ -61,7 +61,7 @@ describe('HistoryPanel', () => {
 
   it('marks the datasets of an expired integration', async () => {
     mocked.getArchive.mockResolvedValue([entry('merged', 100, 2580, true)]);
-    render(<HistoryPanel onView={() => {}} reloadToken={0} />);
+    render(<HistoryPanel onView={() => {}} onActivate={() => {}} reloadToken={0} />);
     expect(await screen.findByText('该周整合已过期')).toBeTruthy();
     expect(screen.getByText(/v2/)).toBeTruthy();
   });
@@ -75,7 +75,7 @@ describe('HistoryPanel', () => {
     mocked.getWeeks.mockResolvedValue([40, 39]);
     const onView = vi.fn();
 
-    render(<HistoryPanel onView={onView} reloadToken={1} activeWeek="2640" />);
+    render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={1} activeWeek="2640" />);
 
     // The selectors and 查看 target follow the new week, not the previously
     // selected 2639. The list is restricted to it too, so the old week cannot
@@ -86,13 +86,44 @@ describe('HistoryPanel', () => {
     await waitFor(() => expect(onView).toHaveBeenCalledWith(200, 'merged'));
   });
 
+  it('reopens an unintegrated week from history', async () => {
+    mocked.getArchive.mockResolvedValue([
+      entry('global', 300, 918, false, '2643', 43),
+      entry('local', 301, 6790, false, '2643', 43),
+    ]);
+    mocked.getWeeks.mockResolvedValue([43]);
+    const onActivate = vi.fn();
+
+    render(
+      <HistoryPanel onView={() => {}} onActivate={onActivate} reloadToken={4} activeWeek="2643" />,
+    );
+
+    expect(await screen.findByText('未整合')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /继续本周/ }));
+    expect(onActivate).toHaveBeenCalledWith('2643');
+  });
+
+  it('opens an integrated week from history', async () => {
+    mocked.getArchive.mockResolvedValue([entry('merged', 200, 2580, false, '2640', 40)]);
+    mocked.getWeeks.mockResolvedValue([40]);
+    const onActivate = vi.fn();
+
+    render(
+      <HistoryPanel onView={() => {}} onActivate={onActivate} reloadToken={5} activeWeek="2640" />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /打开本周/ }));
+    expect(onActivate).toHaveBeenCalledWith('2640');
+    expect(screen.queryByText('未整合')).toBeNull();
+  });
+
   it('follows a draft week that has no history entry yet', async () => {
     mocked.getArchive.mockResolvedValue([
       entry('merged', 100, 2580, false, '2639', 39),
       entry('global', 101, 1516, false, '2639', 39),
     ]);
     mocked.getWeeks.mockResolvedValue([39]);
-    render(<HistoryPanel onView={() => {}} reloadToken={3} activeWeek="2643" />);
+    render(<HistoryPanel onView={() => {}} onActivate={() => {}} reloadToken={3} activeWeek="2643" />);
 
     expect(await screen.findByText('第 43 周')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
@@ -110,7 +141,7 @@ describe('HistoryPanel', () => {
     mocked.getWeeks.mockResolvedValue([43, 39]);
     const onView = vi.fn();
 
-    render(<HistoryPanel onView={onView} reloadToken={2} activeWeek="2643" />);
+    render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={2} activeWeek="2643" />);
 
     expect(await screen.findByText('2643')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
@@ -125,7 +156,7 @@ describe('HistoryPanel', () => {
       entry('local', 102, 1736),
     ]);
     const onView = vi.fn();
-    render(<HistoryPanel onView={onView} reloadToken={0} />);
+    render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={0} />);
 
     expect(await screen.findByText('Global')).toBeTruthy();
     expect(screen.getByText('Local')).toBeTruthy();
@@ -142,7 +173,7 @@ describe('HistoryPanel', () => {
       entry('global', 103, 1516, false),
       entry('local', 102, 1736, false),
     ]);
-    render(<HistoryPanel onView={() => {}} reloadToken={0} />);
+    render(<HistoryPanel onView={() => {}} onActivate={() => {}} reloadToken={0} />);
     await screen.findByText('该周整合已过期');
     expect(screen.getAllByText('已过期')).toHaveLength(1);
   });

@@ -17,7 +17,7 @@ vi.mock('./services/api', () => ({
   api: {
     getStatus: vi.fn(), getConfig: vi.fn(), getFiles: vi.fn(),
     importFolder: vi.fn(), addFiles: vi.fn(), finishGlobalMPS: vi.fn(), importLocalMPS: vi.fn(),
-    commit: vi.fn(), discardDraft: vi.fn(), discardWeekImports: vi.fn(),
+    commit: vi.fn(), activateWeek: vi.fn(), discardDraft: vi.fn(), discardWeekImports: vi.fn(),
     exportDataset: vi.fn(), exportBundle: vi.fn(), quit: vi.fn(),
     getGridHeader: vi.fn(), queryData: vi.fn(),
     getArchive: vi.fn(), getYears: vi.fn(), getWeeks: vi.fn(),
@@ -132,6 +132,7 @@ beforeEach(() => {
   mocked.importFolder.mockResolvedValue(IMPORT_RESULT);
   mocked.finishGlobalMPS.mockResolvedValue(FINISH_RESULT);
   mocked.commit.mockResolvedValue(COMMIT_RESULT);
+  mocked.activateWeek.mockResolvedValue(undefined);
   mocked.exportBundle.mockResolvedValue(EXPORT_RESULT);
   mocked.discardDraft.mockResolvedValue({ ...IMPORT_RESULT, action: 'discard', fileCount: 13, rowCount: 1516 });
   mocked.discardWeekImports.mockResolvedValue({ weekCode: '2639', datasets: 2 });
@@ -157,6 +158,7 @@ describe('App', () => {
     expect(screen.getByText('13 个文件 · 已导入')).toBeTruthy();
     expect(screen.getByText('Local 数据 v1')).toBeTruthy();
   });
+
 
   it('points the history panel at the current workbench week', async () => {
     mocked.getArchive.mockResolvedValue([

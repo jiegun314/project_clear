@@ -20,11 +20,22 @@ export function DatasetTag({ dataset }: { dataset: string }) {
   return (
     <Tag
       style={{
+        // A fixed box so 整合 / Global / Local line up as one column of labels;
+        // the width is the natural width of the longest label, Global.
         margin: 0,
-        padding: '0 6px',
+        padding: 0,
+        width: 45,
+        height: 20,
+        boxSizing: 'border-box',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: '0 0 45px',
         fontSize: 11,
         lineHeight: '18px',
         borderRadius: 3,
+        whiteSpace: 'nowrap',
+        verticalAlign: 'middle',
         ...style,
       }}
     >

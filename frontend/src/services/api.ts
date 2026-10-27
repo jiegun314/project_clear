@@ -31,6 +31,7 @@ interface AppBindings {
   FinishGlobalMPS(confirmFailures: boolean): Promise<FinishResult>;
   ImportLocalMPS(): Promise<ImportResult | null>;
   Commit(weekLimit: number): Promise<CommitResult>;
+  ActivateWeek(weekCode: string): Promise<void>;
   DiscardDraft(): Promise<ImportResult>;
   DiscardWeekImports(weekCode: string): Promise<DiscardWeekResult>;
   GetFiles(): Promise<FilesView>;
@@ -87,6 +88,7 @@ export const api = {
   /** The Local workbook is a complete dataset on its own. */
   importLocalMPS: () => app().ImportLocalMPS(),
   commit: (weekLimit: number) => app().Commit(weekLimit),
+  activateWeek: (weekCode: string) => app().ActivateWeek(weekCode),
   /** Discards the open Global draft only. */
   discardDraft: () => app().DiscardDraft(),
   /** Discards the week's un-integrated exports; history is untouched. */

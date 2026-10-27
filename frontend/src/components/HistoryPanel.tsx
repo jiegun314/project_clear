@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Select, Button, Empty, Tag } from 'antd';
-import { History, Eye } from 'lucide-react';
+import { Select, Button, Empty, Tag, Tooltip } from 'antd';
+import { History, Eye, Play } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
 import type { ArchiveEntry } from '../types';
@@ -9,6 +9,8 @@ import { DatasetTag } from './DatasetTag';
 export interface HistoryPanelProps {
   /** Fixed minimum width, as required: the panel must not follow the window. */
   onView: (datasetId: number, dataset: string) => void;
+  /** Loads the selected week back into the workbench (not the read-only view). */
+  onActivate: (weekCode: string) => void;
   reloadToken: number;
   /**
    * The week the current workbench is on. When a new import completes, the
@@ -36,7 +38,7 @@ function weekParts(code: string): { year: number; week: number } | null {
  * integrated datasets. One week holds 整合 / Global / Local; each is a separate
  * dataset and opens on its own.
  */
-export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPanelProps) {
+export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' }: HistoryPanelProps) {
   const [years, setYears] = useState<number[]>([]);
   const [weeks, setWeeks] = useState<number[]>([]);
   const [year, setYear] = useState<number | null>(null);
@@ -127,6 +129,7 @@ export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPa
   const target =
     visibleArchive.find((e) => e.dataset === 'merged') ?? visibleArchive[0];
   const known = Boolean(target);
+  const hasMerged = visibleArchive.some((e) => e.dataset === 'merged');
 
   return (
     <div
@@ -193,6 +196,42 @@ export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPa
           查看
         </Button>
       </div>
+
+      <div style={{ padding: '0 10px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Tooltip
+          title={
+            known
+              ? '把这一周重新载入主数据表；Global / Local 都已存在时可以直接整合'
+              : '该周还没有已完成的导入'
+          }
+        >
+          <Button
+            size="small"
+            icon={<Play size={13} />}
+            disabled={!known}
+            onClick={() => target && onActivate(target.weekCode)}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {hasMerged ? '打开本周' : '继续本周'}
+          </Button>
+        </Tooltip>
+        {known && !hasMerged && (
+          <Tag
+            style={{
+              margin: 0,
+              padding: '0 5px',
+              fontSize: 10,
+              lineHeight: '16px',
+              color: JNJ.warning,
+              borderColor: '#F0DCB8',
+              background: JNJ.warningSoft,
+            }}
+          >
+            未整合
+          </Tag>
+        )}
+      </div>
+
       {target?.expired && (
         <div style={{ padding: '0 10px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Tag style={{ margin: 0, padding: '0 5px', fontSize: 10, lineHeight: '16px', color: JNJ.warning, borderColor: '#F0DCB8', background: JNJ.warningSoft }}>

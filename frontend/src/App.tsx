@@ -164,6 +164,7 @@ export default function App() {
         >
           <HistoryPanel
             onView={actions.openHistory}
+            onActivate={(week) => void actions.runActivateWeek(week)}
             reloadToken={backend.reloadToken}
             activeWeek={backend.status?.activeWeek ?? ''}
           />
