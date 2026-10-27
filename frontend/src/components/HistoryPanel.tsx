@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Select, Button, Empty, Tag, Tooltip } from 'antd';
-import { History, Play } from 'lucide-react';
+import { History, ArrowRight } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
 import type { ArchiveEntry } from '../types';
@@ -196,12 +196,19 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
         >
           <Button
             type="primary"
-            icon={<Play size={14} />}
             disabled={!known || !target}
             onClick={() => target && onActivate(target.weekCode)}
-            style={{ background: JNJ.red, borderColor: JNJ.red, flex: '0 0 auto' }}
+            style={{
+              background: JNJ.red,
+              borderColor: JNJ.red,
+              flex: '0 0 auto',
+              paddingInline: 10,
+            }}
           >
-            {hasMerged ? '打开本周' : '继续本周'}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              打开
+              <ArrowRight size={13} />
+            </span>
           </Button>
         </Tooltip>
       </div>

@@ -83,7 +83,7 @@ describe('HistoryPanel', () => {
     // filter says 40.
     expect(await screen.findByText('第 40 周')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /打开本周/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开$/ }));
     expect(onActivate).toHaveBeenCalledWith('2640');
     expect(onView).not.toHaveBeenCalled();
   });
@@ -101,7 +101,7 @@ describe('HistoryPanel', () => {
     );
 
     expect(await screen.findByText('未整合')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /继续本周/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开$/ }));
     expect(onActivate).toHaveBeenCalledWith('2643');
   });
 
@@ -114,7 +114,7 @@ describe('HistoryPanel', () => {
       <HistoryPanel onView={() => {}} onActivate={onActivate} reloadToken={5} activeWeek="2640" />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /打开本周/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^打开$/ }));
     expect(onActivate).toHaveBeenCalledWith('2640');
     expect(screen.queryByText('未整合')).toBeNull();
   });
@@ -130,7 +130,7 @@ describe('HistoryPanel', () => {
     expect(await screen.findByText('第 43 周')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
     expect(screen.getByText('该周暂无数据')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /继续本周/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /^打开$/ }).hasAttribute('disabled')).toBe(true);
   });
 
   it('lists only the week selected in the year/week filter', async () => {
