@@ -156,7 +156,10 @@ describe('App', () => {
     expect(screen.getByText('2639 · Global v2 1,516 / Local v1 1,736')).toBeTruthy();
     expect(screen.getByText(/Local 文件：local\.xlsx/)).toBeTruthy();
     expect(screen.getByText('13 个文件 · 已导入')).toBeTruthy();
-    expect(screen.getByText('Local 数据 v1')).toBeTruthy();
+    // The grid title is derived from the header query; it can arrive a tick
+    // after the status strip, so wait for it rather than assuming both land in
+    // the same render (this used to flake on the slower CI runner).
+    expect(await screen.findByText('Local 数据 v1')).toBeTruthy();
   });
 
 
