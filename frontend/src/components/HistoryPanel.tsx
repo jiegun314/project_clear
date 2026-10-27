@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Select, Button, Typography, Empty, Tooltip, Tag } from 'antd';
+import { Select, Button, Empty, Tag } from 'antd';
 import { History, Eye } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
@@ -16,6 +16,19 @@ export interface HistoryPanelProps {
    * viewed week; an empty value (fresh launch) leaves the default selection.
    */
   activeWeek?: string;
+}
+
+/**
+ * Week codes are YYWW. ActiveWeek can point at a week that has only a draft and
+ * therefore no archive entry yet; deriving the year/week lets the filter follow
+ * the workbench even then.
+ */
+function weekParts(code: string): { year: number; week: number } | null {
+  if (!/^\d{4}$/.test(code)) return null;
+  const year = 2000 + Number(code.slice(0, 2));
+  const week = Number(code.slice(2));
+  if (week < 1 || week > 53) return null;
+  return { year, week };
 }
 
 /**
@@ -42,16 +55,28 @@ export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPa
         const [ys, list] = await Promise.all([api.getYears(), api.getArchive()]);
         if (!alive) return;
         const rows = list ?? [];
-        setYears(ys ?? []);
-        setArchive(rows);
         const focus = activeWeek ? rows.find((e) => e.weekCode === activeWeek) : undefined;
-        if (focus && lastFocus.current !== activeWeek) {
+        const active = focus
+          ? { year: focus.year, week: focus.weekNo }
+          : activeWeek
+            ? weekParts(activeWeek)
+            : null;
+        let nextYears = ys ?? [];
+        if (active && !nextYears.includes(active.year)) {
+          nextYears = [active.year, ...nextYears];
+        }
+        setYears(nextYears);
+        setArchive(rows);
+        if (!activeWeek) {
+          lastFocus.current = null;
+        }
+        if (active && lastFocus.current !== activeWeek) {
           lastFocus.current = activeWeek;
-          setYear(focus.year);
-          setWeek(focus.weekNo);
+          setYear(active.year);
+          setWeek(active.week);
         } else {
-          if (activeWeek && !focus) lastFocus.current = null;
-          if (ys && ys.length) setYear((prev) => prev ?? ys[0]);
+          if (activeWeek && !active) lastFocus.current = null;
+          if (nextYears.length) setYear((prev) => prev ?? nextYears[0]);
           else setYear(null);
         }
       } finally {
@@ -71,12 +96,19 @@ export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPa
       setWeek(null);
       return;
     }
+    const active = activeWeek ? weekParts(activeWeek) : null;
     void api
       .getWeeks(year)
       .then((ws) => {
         if (!alive) return;
-        setWeeks(ws ?? []);
-        setWeek((prev) => (prev && ws?.includes(prev) ? prev : ws?.[0] ?? null));
+        let options = ws ?? [];
+        // A draft week has no ready archive entry yet; keep it selectable so the
+        // filter can follow the workbench while the import is in progress.
+        if (active && active.year === year && !options.includes(active.week)) {
+          options = [...options, active.week];
+        }
+        setWeeks(options);
+        setWeek((prev) => (prev && options.includes(prev) ? prev : options[0] ?? null));
       })
       .catch(() => {
         if (alive) setWeeks([]);
@@ -84,13 +116,16 @@ export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPa
     return () => {
       alive = false;
     };
-  }, [year, reloadToken]);
+  }, [year, reloadToken, activeWeek]);
 
-  const target = (() => {
-    if (year == null || week == null) return undefined;
-    const entries = archive.filter((e) => e.year === year && e.weekNo === week);
-    return entries.find((e) => e.dataset === 'merged') ?? entries[0];
-  })();
+  // The list is the selected week, not the whole archive. The archive itself
+  // still drives the year/week options and the week count in the header.
+  const visibleArchive =
+    year == null || week == null
+      ? []
+      : archive.filter((e) => e.year === year && e.weekNo === week);
+  const target =
+    visibleArchive.find((e) => e.dataset === 'merged') ?? visibleArchive[0];
   const known = Boolean(target);
 
   return (
@@ -166,24 +201,24 @@ export function HistoryPanel({ onView, reloadToken, activeWeek = '' }: HistoryPa
           <span style={{ fontSize: 11, color: JNJ.warning }}>历史仍是上次整合版本</span>
         </div>
       )}
-      {year != null && !known && (
-        <div style={{ padding: '0 10px 6px' }}>
-          <Tooltip title="该周尚未整合入库">
-            <Typography.Text style={{ fontSize: 11, color: JNJ.warning }}>该周暂无数据</Typography.Text>
-          </Tooltip>
-        </div>
-      )}
-
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', borderTop: `1px solid ${JNJ.divider}` }}>
         {archive.length === 0 ? (
           <div style={{ padding: 16 }}>
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未完成任何周数据导入" />
           </div>
+        ) : visibleArchive.length === 0 ? (
+          <div style={{ padding: 16 }}>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该周暂无数据" />
+          </div>
         ) : (
-          archive.map((e) => (
+          visibleArchive.map((e) => (
             <div
               key={`${e.weekCode}/${e.dataset}`}
-              onClick={() => onView(e.datasetId, e.dataset)}
+              onClick={() => {
+                setYear(e.year);
+                setWeek(e.weekNo);
+                onView(e.datasetId, e.dataset);
+              }}
               style={{
                 padding: '7px 12px',
                 borderBottom: `1px solid ${JNJ.divider}`,

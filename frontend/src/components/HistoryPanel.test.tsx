@@ -78,10 +78,45 @@ describe('HistoryPanel', () => {
     render(<HistoryPanel onView={onView} reloadToken={1} activeWeek="2640" />);
 
     // The selectors and 查看 target follow the new week, not the previously
-    // selected 2639.
+    // selected 2639. The list is restricted to it too, so the old week cannot
+    // be opened while the filter says 40.
     expect(await screen.findByText('第 40 周')).toBeTruthy();
+    expect(screen.queryByText('2639')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /查看/ }));
     await waitFor(() => expect(onView).toHaveBeenCalledWith(200, 'merged'));
+  });
+
+  it('follows a draft week that has no history entry yet', async () => {
+    mocked.getArchive.mockResolvedValue([
+      entry('merged', 100, 2580, false, '2639', 39),
+      entry('global', 101, 1516, false, '2639', 39),
+    ]);
+    mocked.getWeeks.mockResolvedValue([39]);
+    render(<HistoryPanel onView={() => {}} reloadToken={3} activeWeek="2643" />);
+
+    expect(await screen.findByText('第 43 周')).toBeTruthy();
+    expect(screen.queryByText('2639')).toBeNull();
+    expect(screen.getByText('该周暂无数据')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /查看/ }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('lists only the week selected in the year/week filter', async () => {
+    mocked.getArchive.mockResolvedValue([
+      entry('global', 300, 918, false, '2643', 43),
+      entry('merged', 100, 2580, false, '2639', 39),
+      entry('global', 101, 1516, false, '2639', 39),
+      entry('local', 102, 1736, false, '2639', 39),
+    ]);
+    mocked.getWeeks.mockResolvedValue([43, 39]);
+    const onView = vi.fn();
+
+    render(<HistoryPanel onView={onView} reloadToken={2} activeWeek="2643" />);
+
+    expect(await screen.findByText('2643')).toBeTruthy();
+    expect(screen.queryByText('2639')).toBeNull();
+    expect(screen.queryByText(/2,580 行/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
+    await waitFor(() => expect(onView).toHaveBeenCalledWith(300, 'global'));
   });
 
   it('lists a week whose imports are complete but not integrated yet', async () => {
