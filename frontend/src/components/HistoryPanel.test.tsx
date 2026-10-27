@@ -51,11 +51,11 @@ describe('HistoryPanel', () => {
     await waitFor(() => expect(onView).toHaveBeenCalledWith(101, 'global'));
   });
 
-  it('opens the week\'s merged dataset from the 查看 button', async () => {
+  it('opens the week\'s merged dataset from its list row', async () => {
     const onView = vi.fn();
     render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={0} />);
     await screen.findByText('整合');
-    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
+    fireEvent.click(screen.getByText('整合').closest('div[style*="cursor"]') as HTMLElement);
     await waitFor(() => expect(onView).toHaveBeenCalledWith(100, 'merged'));
   });
 
@@ -74,16 +74,18 @@ describe('HistoryPanel', () => {
     ]);
     mocked.getWeeks.mockResolvedValue([40, 39]);
     const onView = vi.fn();
+    const onActivate = vi.fn();
 
-    render(<HistoryPanel onView={onView} onActivate={() => {}} reloadToken={1} activeWeek="2640" />);
+    render(<HistoryPanel onView={onView} onActivate={onActivate} reloadToken={1} activeWeek="2640" />);
 
-    // The selectors and 查看 target follow the new week, not the previously
-    // selected 2639. The list is restricted to it too, so the old week cannot
-    // be opened while the filter says 40.
+    // The selectors follow the new week, not the previously selected 2639. The
+    // list is restricted to it too, so the old week cannot be opened while the
+    // filter says 40.
     expect(await screen.findByText('第 40 周')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
-    await waitFor(() => expect(onView).toHaveBeenCalledWith(200, 'merged'));
+    fireEvent.click(screen.getByRole('button', { name: /打开本周/ }));
+    expect(onActivate).toHaveBeenCalledWith('2640');
+    expect(onView).not.toHaveBeenCalled();
   });
 
   it('reopens an unintegrated week from history', async () => {
@@ -128,7 +130,7 @@ describe('HistoryPanel', () => {
     expect(await screen.findByText('第 43 周')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
     expect(screen.getByText('该周暂无数据')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /查看/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /继续本周/ }).hasAttribute('disabled')).toBe(true);
   });
 
   it('lists only the week selected in the year/week filter', async () => {
@@ -146,7 +148,7 @@ describe('HistoryPanel', () => {
     expect(await screen.findByText('2643')).toBeTruthy();
     expect(screen.queryByText('2639')).toBeNull();
     expect(screen.queryByText(/2,580 行/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
+    fireEvent.click(screen.getByText('Global').closest('div[style*="cursor"]') as HTMLElement);
     await waitFor(() => expect(onView).toHaveBeenCalledWith(300, 'global'));
   });
 
@@ -161,7 +163,7 @@ describe('HistoryPanel', () => {
     expect(await screen.findByText('Global')).toBeTruthy();
     expect(screen.getByText('Local')).toBeTruthy();
     expect(screen.queryByText('整合')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /查看/ }));
+    fireEvent.click(screen.getByText('Global').closest('div[style*="cursor"]') as HTMLElement);
     await waitFor(() => expect(onView).toHaveBeenCalledWith(101, 'global'));
   });
 

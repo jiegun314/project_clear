@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Select, Button, Empty, Tag, Tooltip } from 'antd';
-import { History, Eye, Play } from 'lucide-react';
+import { History, Play } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
 import type { ArchiveEntry } from '../types';
@@ -165,7 +165,8 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
         </span>
       </div>
 
-      {/* One row: year, week and 查看. */}
+      {/* One row: year, week and the action that opens the week. Read-only
+          history remains one click away on any dataset row below. */}
       <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
         <Select
           style={{ width: 86, flex: '0 0 86px' }}
@@ -186,18 +187,6 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
           options={weeks.map((w) => ({ label: `第 ${w} 周`, value: w }))}
           notFoundContent={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />}
         />
-        <Button
-          type="primary"
-          icon={<Eye size={15} />}
-          disabled={!known || !target}
-          onClick={() => target && onView(target.datasetId, target.dataset)}
-          style={{ background: JNJ.red, borderColor: JNJ.red, flex: '0 0 auto' }}
-        >
-          查看
-        </Button>
-      </div>
-
-      <div style={{ padding: '0 10px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
         <Tooltip
           title={
             known
@@ -206,16 +195,19 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
           }
         >
           <Button
-            size="small"
-            icon={<Play size={13} />}
-            disabled={!known}
+            type="primary"
+            icon={<Play size={14} />}
+            disabled={!known || !target}
             onClick={() => target && onActivate(target.weekCode)}
-            style={{ flex: 1, minWidth: 0 }}
+            style={{ background: JNJ.red, borderColor: JNJ.red, flex: '0 0 auto' }}
           >
             {hasMerged ? '打开本周' : '继续本周'}
           </Button>
         </Tooltip>
-        {known && !hasMerged && (
+      </div>
+
+      {known && !hasMerged && (
+        <div style={{ padding: '0 10px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Tag
             style={{
               margin: 0,
@@ -229,8 +221,9 @@ export function HistoryPanel({ onView, onActivate, reloadToken, activeWeek = '' 
           >
             未整合
           </Tag>
-        )}
-      </div>
+          <span style={{ fontSize: 11, color: JNJ.warning }}>可继续处理</span>
+        </div>
+      )}
 
       {target?.expired && (
         <div style={{ padding: '0 10px 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
