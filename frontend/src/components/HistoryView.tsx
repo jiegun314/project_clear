@@ -19,6 +19,8 @@ export interface HistoryViewProps {
    * （这里曾经直接调 api.export，进度事件落在任务包装之外，无人认领）。
    */
   onExport: (datasetId: number, mode: 'clean' | 'template') => Promise<ExportResult | null>;
+  /** The merged row's coloured three-table export, identical to the toolbar's. */
+  onExportBundle: (weekCode: string) => Promise<ExportResult | null>;
   /**
    * 首次载入完成（拿到数据，或确认这一周没有数据）时回调一次。
    * App 用它收起点击后立刻盖上的全屏加载遮罩。
@@ -32,7 +34,7 @@ export interface HistoryViewProps {
  * backend, but the page size is deliberately larger than the main grid because
  * the brief asks for "all data" here.
  */
-export function HistoryView({ datasetId, dataset = 'merged', onClose, onExported, onExport, onReady }: HistoryViewProps) {
+export function HistoryView({ datasetId, dataset = 'merged', onClose, onExported, onExport, onExportBundle, onReady }: HistoryViewProps) {
   const q = useTableQuery({
     datasetID: datasetId,
     defaultPageSize: 500,
@@ -56,6 +58,20 @@ export function HistoryView({ datasetId, dataset = 'merged', onClose, onExported
     try {
       const res = await onExport(datasetId, mode);
       if (res) onExported(`已导出 ${res.rows} 行 × ${res.cols} 列 → ${res.destPath}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // The merged row's coloured export is the toolbar's three-table exporter. It
+  // needs only the week: the integration and its selected week range come from
+  // the database, so it keeps working after the workbench has been cleared.
+  const doBundle = async () => {
+    const week = q.header?.weekCode;
+    if (!week) return;
+    setExporting(true);
+    try {
+      await onExportBundle(week);
     } finally {
       setExporting(false);
     }
@@ -112,9 +128,15 @@ export function HistoryView({ datasetId, dataset = 'merged', onClose, onExported
             <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport('clean')}>
               导出纯数据 (.xlsx)
             </Button>
-            <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport('template')}>
-              导出原文件格式 (.xlsm)
-            </Button>
+            {dataset === 'merged' ? (
+              <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doBundle()}>
+                导出三表（带颜色） (.xlsx)
+              </Button>
+            ) : (
+              <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport('template')}>
+                导出原文件格式 (.xlsm)
+              </Button>
+            )}
             <Button type="primary" onClick={onClose} style={{ background: JNJ.red, borderColor: JNJ.red }}>
               关闭
             </Button>

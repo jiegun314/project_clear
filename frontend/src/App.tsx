@@ -208,6 +208,7 @@ export default function App() {
         onClose={actions.closeHistory}
         onExported={(m) => tasks.setNotice({ type: 'success', text: m })}
         onExport={(datasetId, mode) => actions.runExport(datasetId, mode)}
+        onExportBundle={(week) => actions.runExportBundle(week)}
         onReady={actions.historyReady}
       />
       {actions.historyLoading && (

@@ -32,9 +32,23 @@ function row(seq: number, item: string): GridRow {
 
 const result = (rows: GridRow[]): GridResult => ({ rows, total: rows.length, page: 1, pageSize: 500 });
 
-function renderHistory(datasetId: number | null, onReady?: () => void, onExport = vi.fn(async () => null)) {
+function renderHistory(
+  datasetId: number | null,
+  onReady?: () => void,
+  onExport = vi.fn(async () => null),
+  onExportBundle = vi.fn(async () => null),
+  dataset = 'merged',
+) {
   return render(
-    <HistoryView datasetId={datasetId} onClose={() => {}} onExported={() => {}} onExport={onExport} onReady={onReady} />,
+    <HistoryView
+      datasetId={datasetId}
+      dataset={dataset}
+      onClose={() => {}}
+      onExported={() => {}}
+      onExport={onExport}
+      onExportBundle={onExportBundle}
+      onReady={onReady}
+    />,
   );
 }
 
@@ -76,7 +90,14 @@ describe('HistoryView', () => {
     await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
 
     view.rerender(
-      <HistoryView datasetId={9} onClose={() => {}} onExported={() => {}} onExport={async () => null} onReady={onReady} />,
+      <HistoryView
+        datasetId={9}
+        onClose={() => {}}
+        onExported={() => {}}
+        onExport={async () => null}
+        onExportBundle={async () => null}
+        onReady={onReady}
+      />,
     );
     await new Promise((r) => setTimeout(r, 20));
     expect(onReady).toHaveBeenCalledTimes(1);
@@ -87,15 +108,37 @@ describe('HistoryView', () => {
     expect(onReady).toHaveBeenCalledTimes(1);
   });
 
-  it('exports the dataset it is showing', async () => {
+  it('exports the merged dataset as clean MPS or as the coloured three-table file', async () => {
     mocked.getGridHeader.mockResolvedValue(header);
     mocked.queryData.mockResolvedValue(result([row(1, 'ITEM-0001')]));
     const onExport = vi.fn(async () => null);
+    const onExportBundle = vi.fn(async () => null);
 
-    renderHistory(9, undefined, onExport);
+    renderHistory(9, undefined, onExport, onExportBundle);
     await screen.findAllByText('ITEM-0001');
-    fireEvent.click(screen.getByRole('button', { name: /导出纯数据/ }));
 
+    // The old template (.xlsm) export is gone from the merged row; the
+    // coloured three-table export replaces it.
+    expect(screen.queryByRole('button', { name: /原文件格式/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /导出纯数据/ }));
     await waitFor(() => expect(onExport).toHaveBeenCalledWith(9, 'clean'));
+
+    fireEvent.click(screen.getByRole('button', { name: /导出三表（带颜色）/ }));
+    await waitFor(() => expect(onExportBundle).toHaveBeenCalledWith('2639'));
+    // The bundle uses the week, so it still works when no workbench session is open.
+    expect(onExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the original-format export for Global/Local input datasets', async () => {
+    mocked.getGridHeader.mockResolvedValue({ ...header, kind: 'global' });
+    mocked.queryData.mockResolvedValue(result([row(1, 'ITEM-0001')]));
+    const onExport = vi.fn(async () => null);
+    const onExportBundle = vi.fn(async () => null);
+
+    renderHistory(9, undefined, onExport, onExportBundle, 'global');
+    await screen.findAllByText('ITEM-0001');
+    expect(screen.queryByRole('button', { name: /导出三表（带颜色）/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /导出原文件格式/ }));
+    await waitFor(() => expect(onExport).toHaveBeenCalledWith(9, 'template'));
   });
 });

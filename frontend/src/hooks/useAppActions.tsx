@@ -68,6 +68,8 @@ export interface AppActions {
   closeMerge: () => void;
   confirmMerge: (weeks: number) => Promise<void>;
   runExport: (datasetId?: number, mode?: string) => Promise<ExportResult | null>;
+  /** Three-table export for a week (toolbar and the merged history row). */
+  runExportBundle: (weekCode?: string) => Promise<ExportResult | null>;
   runToolbarExport: () => Promise<void>;
   /** 清空: discard the open Global draft only. */
   runDiscardDraft: () => void;
@@ -322,8 +324,8 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     }
   };
 
-  const runToolbarExport = async () => {
-    const week = backend.status?.activeWeek ?? '';
+  const runExportBundle = async (weekCode?: string): Promise<ExportResult | null> => {
+    const week = weekCode?.trim() || backend.status?.activeWeek || '';
     tasks.begin('导出三表', 0, 2);
     let ok = false;
     try {
@@ -332,11 +334,17 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
       if (r) {
         showExport(r);
       }
+      return r;
     } catch (e) {
       tasks.setNotice({ type: 'error', text: errorText(e) });
+      return null;
     } finally {
       tasks.finish(ok);
     }
+  };
+
+  const runToolbarExport = async () => {
+    await runExportBundle(backend.status?.activeWeek ?? '');
   };
 
   const runDiscardDraft = () => {
@@ -454,6 +462,7 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
     closeMerge,
     confirmMerge,
     runExport,
+    runExportBundle,
     runToolbarExport,
     runDiscardDraft,
     runDiscardWeek,
