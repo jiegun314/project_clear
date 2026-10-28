@@ -298,7 +298,7 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 		}
 		name := filepath.Base(p)
 		fr, err := mps.ReadFile(p, mps.ReadOptions{
-			LOCFilter:   cfg.LOCFilter,
+			LOCFilter:   cfg.GlobalLOCFilter,
 			ReadColumns: cfg.ReadColumns,
 			Dict:        dict,
 			Dxf:         dxf,
@@ -361,7 +361,7 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 		}
 		res.OK++
 		res.RowsKept += fr.RowsKept
-		s.log.Info("读取", "%s: 数据行 %d，LOC=%s 命中 %d 行", name, fr.RowsTotal, cfg.LOCFilter, fr.RowsKept)
+		s.log.Info("读取", "%s: 数据行 %d，LOC=%s 命中 %d 行", name, fr.RowsTotal, cfg.GlobalLOCFilter, fr.RowsKept)
 
 		res.Files = append(res.Files, FileResult{
 			Name: name, Path: p, Size: fr.Size, Status: "ok",
@@ -542,7 +542,7 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 		progress("读取本地文件", 0, 2)
 	}
 	dict := mps.NewStyleDict()
-	local, err := mps.ReadLocalFile(path, mps.ReadOptions{LOCFilter: cfg.LOCFilter, Dict: dict})
+	local, err := mps.ReadLocalFile(path, mps.ReadOptions{LOCFilter: cfg.LocalLOCFilter, Dict: dict})
 	if err != nil {
 		s.log.Error("本地", "%s 格式检查未通过: %v", name, err)
 		return nil, err
@@ -606,7 +606,7 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 		Warnings: []string{}, DurationMS: time.Since(start).Milliseconds(),
 	}
 	s.log.Success("本地", "已导入 %s：Local v%d，%d 行（LOC=%s 命中 %d/%d 行），周码 %s",
-		name, d.Version, d.RowCount, cfg.LOCFilter, local.RowsKept, local.RowsTotal, week)
+		name, d.Version, d.RowCount, cfg.LocalLOCFilter, local.RowsKept, local.RowsTotal, week)
 	if expired {
 		s.log.Warn("本地", "周码 %s 的 Local 版本使已有整合（%s）过期；请重新整合", week, integrationAt)
 	}

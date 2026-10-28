@@ -201,14 +201,25 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
 
         <Section>
           <Form.Item
-            label="LOC 筛选值（L 列）"
-            extra="只保留该 LOC 的数据行，留空将回退为 WH_CNB"
+            label="Global LOC 筛选值（L 列）"
+            extra="只保留这些 LOC 的 Global 数据行；多个值用英文逗号分隔"
+            style={{ marginBottom: 12 }}
+          >
+            <Input
+              value={cfg.globalLocFilter}
+              onChange={(e) => setCfg({ ...cfg, globalLocFilter: e.target.value })}
+              placeholder="WH_CNB"
+            />
+          </Form.Item>
+          <Form.Item
+            label="Local LOC 筛选值（L 列）"
+            extra="只保留这些 LOC 的 Local 数据行；多个值用英文逗号分隔"
             style={{ marginBottom: 0 }}
           >
             <Input
-              value={cfg.locFilter}
-              onChange={(e) => setCfg({ ...cfg, locFilter: e.target.value })}
-              placeholder="WH_CNB"
+              value={cfg.localLocFilter}
+              onChange={(e) => setCfg({ ...cfg, localLocFilter: e.target.value })}
+              placeholder="WH_CNB,WH_CNS"
             />
           </Form.Item>
         </Section>

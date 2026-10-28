@@ -53,9 +53,14 @@ type Config struct {
 	// at least 61 (P through BX) so the integration cutoff (AO/BX) can be chosen
 	// after import.
 	ReadColumns int `yaml:"readColumns" json:"readColumns"`
-	// LOCFilter is the value required in the LOC column (column L) for a row
-	// to be kept.
-	LOCFilter string `yaml:"locFilter" json:"locFilter"`
+	// GlobalLOCFilter is the comma-separated LOC filter for Global workbooks.
+	GlobalLOCFilter string `yaml:"globalLocFilter" json:"globalLocFilter"`
+	// LocalLOCFilter is the comma-separated LOC filter for Local workbooks.
+	// Local commonly contains more than one warehouse, hence the list.
+	LocalLOCFilter string `yaml:"localLocFilter" json:"localLocFilter"`
+	// LOCFilter is the pre-v4 single filter, read only for migration. It is
+	// never written back.
+	LOCFilter string `yaml:"locFilter,omitempty" json:"-"`
 	// PageSize is the row count per page in the main data grid.
 	PageSize int `yaml:"pageSize" json:"pageSize"`
 	// HeaderDisplay is twoRow (default) or oneRow.
@@ -72,17 +77,19 @@ type Config struct {
 // v2: the default export mode became 纯数据 (clean).
 // v3: the default read range grew to 61 weeks (P through BX) for the AO/BX
 // integration cutoff.
-const currentConfigVersion = 3
+// v4: the single LOC filter split into Global and Local filters.
+const currentConfigVersion = 4
 
 // Default returns the built-in parameter set, matching the specification.
 func Default() Config {
 	return Config{
-		ConfigVersion: currentConfigVersion,
-		ReadColumns:   61,
-		LOCFilter:     "WH_CNB",
-		PageSize:      200,
-		HeaderDisplay: HeaderTwoRow,
-		ExportMode:    ExportClean,
+		ConfigVersion:   currentConfigVersion,
+		ReadColumns:     61,
+		GlobalLOCFilter: "WH_CNB",
+		LocalLOCFilter:  "WH_CNB,WH_CNS",
+		PageSize:        200,
+		HeaderDisplay:   HeaderTwoRow,
+		ExportMode:      ExportClean,
 	}
 }
 
@@ -105,12 +112,31 @@ func (c *Config) Validate() []string {
 		notes = append(notes, fmt.Sprintf("导出模式 %q 无效，已重置为 clean", c.ExportMode))
 		c.ExportMode = ExportClean
 	}
-	c.LOCFilter = trimSpace(c.LOCFilter)
-	if c.LOCFilter == "" {
-		notes = append(notes, "LOC 筛选值不能为空，已重置为 WH_CNB")
-		c.LOCFilter = "WH_CNB"
+	c.GlobalLOCFilter = normalizeLOCList(c.GlobalLOCFilter)
+	if c.GlobalLOCFilter == "" {
+		notes = append(notes, "Global LOC 筛选值不能为空，已重置为 WH_CNB")
+		c.GlobalLOCFilter = "WH_CNB"
 	}
+	c.LocalLOCFilter = normalizeLOCList(c.LocalLOCFilter)
+	if c.LocalLOCFilter == "" {
+		notes = append(notes, "Local LOC 筛选值不能为空，已重置为 WH_CNB,WH_CNS")
+		c.LocalLOCFilter = "WH_CNB,WH_CNS"
+	}
+	c.LOCFilter = ""
 	return notes
+}
+
+// normalizeLOCList trims each comma-separated entry and removes empty ones, so
+// " WH_CNB , WH_CNS " is persisted as "WH_CNB,WH_CNS".
+func normalizeLOCList(s string) string {
+	parts := strings.Split(s, ",")
+	out := parts[:0]
+	for _, part := range parts {
+		if part = trimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 func trimSpace(s string) string {
@@ -225,6 +251,24 @@ func migrateConfig(c *Config) (string, bool) {
 	if c.ConfigVersion < 2 && c.ExportMode == ExportTemplate {
 		c.ExportMode = ExportClean
 		note = "导出方式默认值已改为「纯数据」，可在参数设定中改回「原文件格式」"
+	}
+	if c.ConfigVersion < 4 {
+		legacy := trimSpace(c.LOCFilter)
+		if trimSpace(c.GlobalLOCFilter) == "" {
+			if legacy != "" {
+				c.GlobalLOCFilter = legacy
+			} else {
+				c.GlobalLOCFilter = Default().GlobalLOCFilter
+			}
+		}
+		if trimSpace(c.LocalLOCFilter) == "" {
+			c.LocalLOCFilter = Default().LocalLOCFilter
+		}
+		c.LOCFilter = ""
+		if note != "" {
+			note += "；"
+		}
+		note += "LOC 筛选已拆分为 Global 和 Local；Local 默认筛选 WH_CNB,WH_CNS"
 	}
 	if c.ConfigVersion < 3 && c.ReadColumns < 61 {
 		c.ReadColumns = 61

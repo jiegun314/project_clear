@@ -36,8 +36,8 @@ func (a *App) SaveConfig(c config.Config) (out []string, err error) {
 			a.log.Warn("参数", "%s", n)
 		}
 	} else {
-		a.log.Success("参数", "已保存：读取列数 %d，LOC 筛选 %s，每页 %d 行，导出模式 %s",
-			c.ReadColumns, c.LOCFilter, c.PageSize, c.ExportMode)
+		a.log.Success("参数", "已保存：读取列数 %d，Global LOC %s，Local LOC %s，每页 %d 行，导出模式 %s",
+			c.ReadColumns, c.GlobalLOCFilter, c.LocalLOCFilter, c.PageSize, c.ExportMode)
 	}
 	return notes, nil
 }

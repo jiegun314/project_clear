@@ -3,7 +3,8 @@ export namespace config {
 	export class Config {
 	    configVersion: number;
 	    readColumns: number;
-	    locFilter: string;
+	    globalLocFilter: string;
+	    localLocFilter: string;
 	    pageSize: number;
 	    headerDisplay: string;
 	    exportMode: string;
@@ -17,7 +18,8 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.configVersion = source["configVersion"];
 	        this.readColumns = source["readColumns"];
-	        this.locFilter = source["locFilter"];
+	        this.globalLocFilter = source["globalLocFilter"];
+	        this.localLocFilter = source["localLocFilter"];
 	        this.pageSize = source["pageSize"];
 	        this.headerDisplay = source["headerDisplay"];
 	        this.exportMode = source["exportMode"];
@@ -710,7 +712,8 @@ export namespace view {
 	    archivedWeeks: number;
 	    archivedRows: number;
 	    readColumns: number;
-	    locFilter: string;
+	    globalLocFilter: string;
+	    localLocFilter: string;
 	    pageSize: number;
 	    headerDisplay: string;
 	    exportMode: string;
@@ -758,7 +761,8 @@ export namespace view {
 	        this.archivedWeeks = source["archivedWeeks"];
 	        this.archivedRows = source["archivedRows"];
 	        this.readColumns = source["readColumns"];
-	        this.locFilter = source["locFilter"];
+	        this.globalLocFilter = source["globalLocFilter"];
+	        this.localLocFilter = source["localLocFilter"];
 	        this.pageSize = source["pageSize"];
 	        this.headerDisplay = source["headerDisplay"];
 	        this.exportMode = source["exportMode"];

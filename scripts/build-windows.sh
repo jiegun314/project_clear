@@ -93,7 +93,13 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.3.3）
+本版更新（v2.3.4）
+  1. 参数设定的 LOC 筛选拆分为 Global 和 Local 两项。
+     Global 默认 WH_CNB；Local 默认 WH_CNB,WH_CNS。
+  2. 多个筛选项用英文逗号分隔，加载时忽略每项两侧空格，匹配不区分大小写。
+  3. 旧参数文件的单个 locFilter 自动迁移到新的 Global 筛选，Local 使用新的默认值。
+
+包含 v2.3.3 的改动
   1. 历史筛选行按钮文字改为「加载」，去掉箭头图标。
   2. 保持按钮紧凑，年份、周数两个下拉菜单完整显示。
 

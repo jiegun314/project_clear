@@ -88,8 +88,9 @@ func Run(opt Options) error {
 		r.mark("参数 %s", n)
 	}
 	c := cfg.Get()
-	c.LOCFilter = "WH_CNB"
-	c.ReadColumns = 20
+	c.GlobalLOCFilter = "WH_CNB"
+	c.LocalLOCFilter = "WH_CNB,WH_CNS"
+	c.ReadColumns = 61
 	if _, err := cfg.Save(c); err != nil {
 		return fmt.Errorf("config save: %w", err)
 	}
@@ -896,7 +897,7 @@ func sourceComments(dir string) (map[string]int, error) {
 			continue
 		}
 		fr, err := mps.ReadFile(filepath.Join(dir, e.Name()), mps.ReadOptions{
-			LOCFilter: "WH_CNB", ReadColumns: 20, Dict: dict,
+			LOCFilter: "WH_CNB", ReadColumns: 61, Dict: dict,
 		})
 		if err != nil {
 			return nil, err

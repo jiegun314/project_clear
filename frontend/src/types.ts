@@ -188,7 +188,8 @@ export interface ArchiveEntry {
 export interface AppConfig {
   configVersion: number;
   readColumns: number;
-  locFilter: string;
+  globalLocFilter: string;
+  localLocFilter: string;
   pageSize: number;
   headerDisplay: 'twoRow' | 'oneRow';
   exportMode: 'template' | 'clean';
@@ -250,7 +251,8 @@ export interface Status {
   archivedRows: number;
 
   readColumns: number;
-  locFilter: string;
+  globalLocFilter: string;
+  localLocFilter: string;
   pageSize: number;
   headerDisplay: string;
   exportMode: string;

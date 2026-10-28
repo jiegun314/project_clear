@@ -31,7 +31,8 @@ export function StatusBar({
       value: `${status?.archivedWeeks ?? 0} 周 · ${(status?.archivedRows ?? 0).toLocaleString()} 行`,
     },
     { label: '读取列数', value: String(status?.readColumns ?? '-') },
-    { label: 'LOC 筛选', value: status?.locFilter ?? '-' },
+    { label: 'Global LOC', value: status?.globalLocFilter ?? '-' },
+    { label: 'Local LOC', value: status?.localLocFilter ?? '-' },
     { label: '每页行数', value: String(status?.pageSize ?? '-') },
     { label: '导出模式', value: status?.exportMode === 'clean' ? '纯数据' : '原文件格式' },
   ];

@@ -93,11 +93,11 @@ func TestBoundPayloadFieldNamesArePinned(t *testing.T) {
 		{"Status", view.Status{}, []string{
 			"activeWeek", "archivedRows", "archivedWeeks", "canDiscardWeek", "database",
 			"draftFailed", "draftFiles", "draftId", "draftRows", "draftWeek", "exportMode",
-			"globalAt", "globalFiles", "globalId", "globalRows", "globalVersion", "globalWeek", "globalWeeks",
+			"globalAt", "globalFiles", "globalId", "globalLocFilter", "globalRows", "globalVersion", "globalWeek", "globalWeeks",
 			"hasDraft", "hasGlobal", "hasIntegration", "hasLocal", "headerDisplay",
 			"integrationAt", "integrationExpired", "integrationId", "integrationRows",
-			"integrationWeek", "lastAction", "locFilter", "localAt", "localFileName", "localFiles",
-			"localId", "localRows", "localVersion", "localWeek", "localWeeks", "pageSize", "readColumns",
+			"integrationWeek", "lastAction", "localAt", "localFileName", "localFiles",
+			"localId", "localLocFilter", "localRows", "localVersion", "localWeek", "localWeeks", "pageSize", "readColumns",
 			"unintegrated"}},
 		{"CommitResult", view.CommitResult{}, []string{
 			"committedAt", "fileCount", "globalId", "globalRows", "globalVersion", "localId",
@@ -200,7 +200,7 @@ func TestFreshConfigIsUsableImmediately(t *testing.T) {
 		t.Fatalf("config: %v", err)
 	}
 	c := cfg.Get()
-	if c.ReadColumns <= 0 || c.PageSize <= 0 || c.LOCFilter == "" || c.ExportMode == "" {
+	if c.ReadColumns <= 0 || c.PageSize <= 0 || c.GlobalLOCFilter == "" || c.LocalLOCFilter == "" || c.ExportMode == "" {
 		t.Errorf("defaults are not usable: %+v", c)
 	}
 	// Generating the file is reported, not an error.

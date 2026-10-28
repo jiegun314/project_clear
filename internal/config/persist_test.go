@@ -21,7 +21,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	// A client that echoes an empty marker, as an older webview would.
 	if _, err := store.Save(Config{
 		ConfigVersion: 0, ReadColumns: 61, PageSize: 200,
-		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, LOCFilter: "WH_CNB",
+		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, GlobalLOCFilter: "WH_CNB", LocalLOCFilter: "WH_CNB,WH_CNS",
 	}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 3") {
+	if !strings.Contains(string(raw), "configVersion: 4") {
 		t.Errorf("the marker was not stamped: %s", raw)
 	}
 
@@ -83,7 +83,7 @@ func TestLoadPersistsValidationCorrections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"readColumns: 61", "pageSize: 200", "locFilter: WH_CNB"} {
+	for _, want := range []string{"readColumns: 61", "pageSize: 200", "globalLocFilter: WH_CNB", "localLocFilter: WH_CNB,WH_CNS"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("corrected file is missing %q:\n%s", want, raw)
 		}
@@ -101,7 +101,7 @@ func TestSavePersistsTheCorrectionsItReports(t *testing.T) {
 
 	notes, err := store.Save(Config{
 		ReadColumns: 999, PageSize: 1, HeaderDisplay: "nonsense",
-		ExportMode: "nonsense", LOCFilter: "  ",
+		ExportMode: "nonsense", GlobalLOCFilter: "  ", LocalLOCFilter: "  ",
 	})
 	if err != nil {
 		t.Fatalf("save: %v", err)
@@ -160,8 +160,8 @@ func TestLoadLeavesAMalformedFileAlone(t *testing.T) {
 func TestVersionMigrationWithoutAChangeReportsNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clear.yaml")
-	// A file written before the marker existed, already holding the new default.
-	if err := os.WriteFile(path, []byte("readColumns: 61\nexportMode: clean\n"), 0o644); err != nil {
+	// A current file; no migration or correction should have anything to say.
+	if err := os.WriteFile(path, []byte("configVersion: 4\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,5 +179,15 @@ func TestVersionMigrationWithoutAChangeReportsNothing(t *testing.T) {
 	}
 	if len(notes) != 0 {
 		t.Errorf("nothing needed correcting, but notes = %v", notes)
+	}
+}
+
+func TestDefaultLOCFiltersAreSplit(t *testing.T) {
+	c := Default()
+	if c.GlobalLOCFilter != "WH_CNB" {
+		t.Errorf("global filter = %q", c.GlobalLOCFilter)
+	}
+	if c.LocalLOCFilter != "WH_CNB,WH_CNS" {
+		t.Errorf("local filter = %q", c.LocalLOCFilter)
 	}
 }

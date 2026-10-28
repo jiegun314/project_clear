@@ -35,7 +35,7 @@ func (a *App) GetStatus() (out *view.Status, err error) {
 	}
 	c := a.cfg.Get()
 	st := &view.Status{
-		ReadColumns: c.ReadColumns, LOCFilter: c.LOCFilter, PageSize: c.PageSize,
+		ReadColumns: c.ReadColumns, GlobalLOCFilter: c.GlobalLOCFilter, LocalLOCFilter: c.LocalLOCFilter, PageSize: c.PageSize,
 		HeaderDisplay: string(c.HeaderDisplay), ExportMode: string(c.ExportMode),
 		Database: filepath.Join(a.data, "clear.db"),
 	}

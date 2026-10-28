@@ -33,7 +33,7 @@ const mocked = vi.mocked(api);
 const mockedHasBackend = vi.mocked(hasBackend);
 
 const CONFIG: AppConfig = {
-  configVersion: 3, readColumns: 61, locFilter: 'WH_CNB', pageSize: 200,
+  configVersion: 4, readColumns: 61, globalLocFilter: 'WH_CNB', localLocFilter: 'WH_CNB,WH_CNS', pageSize: 200,
   headerDisplay: 'twoRow', exportMode: 'clean', exportDir: '',
 };
 
@@ -47,7 +47,7 @@ const STATUS: Status = {
   integrationAt: '', integrationExpired: false,
   activeWeek: '2639', unintegrated: true, canDiscardWeek: true,
   archivedWeeks: 0, archivedRows: 0,
-  readColumns: 61, locFilter: 'WH_CNB', pageSize: 200, headerDisplay: 'twoRow',
+  readColumns: 61, globalLocFilter: 'WH_CNB', localLocFilter: 'WH_CNB,WH_CNS', pageSize: 200, headerDisplay: 'twoRow',
   exportMode: 'clean', database: '/tmp/clear.db', lastAction: '',
 };
 

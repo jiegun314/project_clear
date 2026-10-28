@@ -168,8 +168,7 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 			continue
 		}
 		out.RowsTotal++
-		if want := strings.TrimSpace(opt.LOCFilter); want != "" &&
-			!strings.EqualFold(localCell(row, locCol), want) {
+		if !LOCMatches(localCell(row, locCol), opt.LOCFilter) {
 			continue
 		}
 		dr := &DataRow{SourceRow: r + 1}

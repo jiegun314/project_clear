@@ -71,13 +71,14 @@ type Status struct {
 	ArchivedWeeks int `json:"archivedWeeks"`
 	ArchivedRows  int `json:"archivedRows"`
 
-	ReadColumns   int    `json:"readColumns"`
-	LOCFilter     string `json:"locFilter"`
-	PageSize      int    `json:"pageSize"`
-	HeaderDisplay string `json:"headerDisplay"`
-	ExportMode    string `json:"exportMode"`
-	Database      string `json:"database"`
-	LastAction    string `json:"lastAction"`
+	ReadColumns     int    `json:"readColumns"`
+	GlobalLOCFilter string `json:"globalLocFilter"`
+	LocalLOCFilter  string `json:"localLocFilter"`
+	PageSize        int    `json:"pageSize"`
+	HeaderDisplay   string `json:"headerDisplay"`
+	ExportMode      string `json:"exportMode"`
+	Database        string `json:"database"`
+	LastAction      string `json:"lastAction"`
 }
 
 // CommitResult reports the outcome of 整合.

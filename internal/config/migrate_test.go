@@ -33,7 +33,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 3") || !strings.Contains(string(raw), "exportMode: clean") {
+	if !strings.Contains(string(raw), "configVersion: 4") || !strings.Contains(string(raw), "exportMode: clean") {
 		t.Errorf("upgraded file = %s", raw)
 	}
 
@@ -42,7 +42,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 		t.Fatalf("reload: %v", err)
 	}
 	if _, err := store.Save(Config{ConfigVersion: currentConfigVersion, ReadColumns: 61, PageSize: 200,
-		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, LOCFilter: "WH_CNB"}); err != nil {
+		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, GlobalLOCFilter: "WH_CNB", LocalLOCFilter: "WH_CNB,WH_CNS"}); err != nil {
 		t.Fatal(err)
 	}
 	again, _, err := NewStoreAt(dir)

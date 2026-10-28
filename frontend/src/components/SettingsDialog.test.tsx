@@ -15,9 +15,10 @@ const { api } = await import('../services/api');
 const mocked = vi.mocked(api);
 
 const CONFIG: AppConfig = {
-  configVersion: 3,
+  configVersion: 4,
   readColumns: 61,
-  locFilter: 'WH_CNB',
+  globalLocFilter: 'WH_CNB',
+  localLocFilter: 'WH_CNB,WH_CNS',
   pageSize: 200,
   headerDisplay: 'twoRow',
   exportMode: 'clean',
@@ -62,7 +63,8 @@ describe('SettingsDialog', () => {
 
     // Labels.
     expect(await screen.findByText('读取列数（从 P 列开始，至少 61）')).toBeTruthy();
-    expect(screen.getByText('LOC 筛选值（L 列）')).toBeTruthy();
+    expect(screen.getByText('Global LOC 筛选值（L 列）')).toBeTruthy();
+    expect(screen.getByText('Local LOC 筛选值（L 列）')).toBeTruthy();
     expect(screen.getByText('每页显示行数')).toBeTruthy();
     expect(screen.getByText('表头显示')).toBeTruthy();
     expect(screen.getByText('导出方式')).toBeTruthy();
@@ -71,8 +73,11 @@ describe('SettingsDialog', () => {
     const numbers = screen.getAllByRole('spinbutton') as HTMLInputElement[];
     expect(numbers.map((n) => n.value)).toEqual(['61', '200']);
 
-    // The text control.
-    expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('WH_CNB');
+    // The two text controls.
+    expect((screen.getAllByRole('textbox') as HTMLInputElement[]).map((n) => n.value)).toEqual([
+      'WH_CNB',
+      'WH_CNB,WH_CNS',
+    ]);
 
     // Each radio group holds its own parameter, so they are asserted per field
     // rather than as one flat list.
@@ -127,7 +132,8 @@ describe('SettingsDialog', () => {
     await screen.findByText('读取列数（从 P 列开始，至少 61）');
 
     expect(screen.getByText('默认 61，覆盖 P..BX；整合时可再选择截止 AO（26 周）或 BX（61 周）')).toBeTruthy();
-    expect(screen.getByText('只保留该 LOC 的数据行，留空将回退为 WH_CNB')).toBeTruthy();
+    expect(screen.getByText('只保留这些 LOC 的 Global 数据行；多个值用英文逗号分隔')).toBeTruthy();
+    expect(screen.getByText('只保留这些 LOC 的 Local 数据行；多个值用英文逗号分隔')).toBeTruthy();
     expect(screen.getByText('两种方式都只输出 MPS 页，都保留颜色、条件格式与备注')).toBeTruthy();
   });
   it('exposes the header display mode, which used to need editing the YAML by hand', async () => {

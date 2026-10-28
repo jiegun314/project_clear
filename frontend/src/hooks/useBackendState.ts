@@ -6,7 +6,8 @@ import type { AppConfig, FilesView, Status } from '../types';
 const DEFAULT_CONFIG: AppConfig = {
   configVersion: 2,
   readColumns: 61,
-  locFilter: 'WH_CNB',
+  globalLocFilter: 'WH_CNB',
+  localLocFilter: 'WH_CNB,WH_CNS',
   pageSize: 200,
   headerDisplay: 'twoRow',
   exportMode: 'clean',

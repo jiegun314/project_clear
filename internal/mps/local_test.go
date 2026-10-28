@@ -108,3 +108,23 @@ func TestReadLocalFileNewLayout(t *testing.T) {
 		t.Fatalf("style dictionary = %+v", out.Dict)
 	}
 }
+
+func TestLOCMatchesCommaSeparatedCaseInsensitive(t *testing.T) {
+	cases := []struct {
+		value, filters string
+		want           bool
+	}{
+		{"WH_CNB", "WH_CNB", true},
+		{"WH_CNS", "WH_CNB,WH_CNS", true},
+		{"WH_CNS", "WH_CNB, WH_CNS", true},
+		{"wh_cnb", "WH_CNB", true},
+		{"WH_CNB", "WH_CNS", false},
+		{"WH_CNB", "", true},
+		{"WH_CNB", " , ", true},
+	}
+	for _, c := range cases {
+		if got := LOCMatches(c.value, c.filters); got != c.want {
+			t.Errorf("LOCMatches(%q, %q) = %v, want %v", c.value, c.filters, got, c.want)
+		}
+	}
+}

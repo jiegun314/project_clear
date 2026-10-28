@@ -240,7 +240,7 @@ func ReadFile(path string, opt ReadOptions) (*FileResult, error) {
 			return nil
 		}
 		res.RowsTotal++
-		if len(cells) < LOCCol || strings.TrimSpace(cells[LOCCol-1]) != opt.LOCFilter {
+		if len(cells) < LOCCol || !LOCMatches(cells[LOCCol-1], opt.LOCFilter) {
 			return nil
 		}
 
@@ -353,6 +353,31 @@ func applyCFColors(rows []*DataRow, header Header, allCells map[int][]string, to
 		}
 		row.CFColors = week
 	}
+}
+
+// LOCMatches reports whether a row's LOC value is one of the comma-separated
+// values in filters. Whitespace around entries is ignored; matching is
+// case-insensitive so hand-edited settings do not silently filter everything
+// out. An empty filter keeps every row.
+func LOCMatches(value, filters string) bool {
+	spec := strings.TrimSpace(filters)
+	if spec == "" {
+		return true
+	}
+	value = strings.TrimSpace(value)
+	matched := false
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		matched = true
+		if strings.EqualFold(part, value) {
+			return true
+		}
+	}
+	// A list made only of commas/spaces is effectively no filter.
+	return !matched
 }
 
 func hasSheet(f *excelize.File, name string) bool {
