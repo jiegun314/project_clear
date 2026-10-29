@@ -77,7 +77,7 @@ func EvalCFColors(prog CFRow, anchorRow int, dxfColors map[int]string, lookup ce
 			if _, done := out[c]; done {
 				continue
 			}
-			hit, err := evalRule(r.kind, r.operator, r.formulas, anchorRow, c, lookup)
+			hit, err := evalRule(r.kind, r.operator, r.formulas, anchorRow, c, r.col1, lookup)
 			if err != nil || !hit {
 				continue
 			}
@@ -90,13 +90,13 @@ func EvalCFColors(prog CFRow, anchorRow int, dxfColors map[int]string, lookup ce
 	return out
 }
 
-func evalRule(kind, operator string, formulas []string, row, col int, lookup cellLookup) (bool, error) {
+func evalRule(kind, operator string, formulas []string, row, col, baseCol int, lookup cellLookup) (bool, error) {
 	switch kind {
 	case "expression":
 		if len(formulas) == 0 {
 			return false, fmt.Errorf("表达式规则没有公式")
 		}
-		v, err := evalFormula(formulas[0], row, col, lookup)
+		v, err := evalFormula(formulas[0], row, col, baseCol, lookup)
 		if err != nil {
 			return false, err
 		}
@@ -105,11 +105,11 @@ func evalRule(kind, operator string, formulas []string, row, col int, lookup cel
 		if len(formulas) < 1 {
 			return false, fmt.Errorf("cellIs 规则没有公式")
 		}
-		left, err := evalFormula("REF", row, col, lookup)
+		left, err := evalFormula("REF", row, col, baseCol, lookup)
 		if err != nil {
 			return false, err
 		}
-		right, err := evalFormula(formulas[0], row, col, lookup)
+		right, err := evalFormula(formulas[0], row, col, baseCol, lookup)
 		if err != nil {
 			return false, err
 		}
@@ -185,8 +185,8 @@ func compare(op string, a, b cfValue) bool {
 	return false
 }
 
-func evalFormula(formula string, row, col int, lookup cellLookup) (cfValue, error) {
-	p := &cfParser{src: []rune(strings.TrimSpace(formula)), row: row, col: col, lookup: lookup}
+func evalFormula(formula string, row, col, baseCol int, lookup cellLookup) (cfValue, error) {
+	p := &cfParser{src: []rune(strings.TrimSpace(formula)), row: row, col: col, baseCol: baseCol, lookup: lookup}
 	v, err := p.parseExpr()
 	if err != nil {
 		return cfValue{}, err
@@ -199,11 +199,12 @@ func evalFormula(formula string, row, col int, lookup cellLookup) (cfValue, erro
 }
 
 type cfParser struct {
-	src    []rune
-	pos    int
-	row    int
-	col    int
-	lookup cellLookup
+	src     []rune
+	pos     int
+	row     int
+	col     int
+	baseCol int
+	lookup  cellLookup
 }
 
 func (p *cfParser) skipSpace() {
@@ -417,7 +418,7 @@ func (p *cfParser) parseName() (cfValue, error) {
 	if upper == "FALSE" {
 		return boolValue(false), nil
 	}
-	row, col, ok := resolveRef(token, p.row, p.col)
+	row, col, ok := resolveRef(token, p.row, p.col, p.baseCol)
 	if !ok {
 		return cfValue{}, fmt.Errorf("无法解析引用 %q", token)
 	}
@@ -530,7 +531,8 @@ func roundTo(v float64, digits int) float64 {
 
 // resolveRef turns a stored reference such as "P#o2", "P$#a181" or "$DN$56"
 // into a concrete (row, col). anchorRow is the row the formula was captured on.
-func resolveRef(token string, anchorRow, anchorCol int) (row, col int, ok bool) {
+func resolveRef(token string, anchorRow, anchorCol, baseCol int) (row, col int, ok bool) {
+	colAbsolute := strings.HasPrefix(token, "$")
 	t := strings.TrimPrefix(token, "$")
 	i := 0
 	for i < len(t) && unicode.IsLetter(rune(t[i])) {
@@ -544,6 +546,17 @@ func resolveRef(token string, anchorRow, anchorCol int) (row, col int, ok bool) 
 	c, err := ColumnNumber(strings.ToUpper(colName))
 	if err != nil {
 		return 0, 0, false
+	}
+	// In an Excel conditional-format formula a bare column (P13) is relative to
+	// the first cell of the rule's range; only $P is absolute. The formula is
+	// reused for every cell in the range, so shift the column by the distance
+	// from the range's first column. Without this every cell was evaluated as
+	// column P and Local CalcOH rows became a single flat colour.
+	if !colAbsolute {
+		c = anchorCol + (c - baseCol)
+		if c < 1 {
+			return 0, 0, false
+		}
 	}
 	switch {
 	case strings.HasPrefix(rest, offsetToken):

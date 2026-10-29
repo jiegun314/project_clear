@@ -96,3 +96,25 @@ func TestDxfFillColorsReadsBackgroundColour(t *testing.T) {
 		t.Errorf("fgColor 回退 = %q, want #00B0F0", colors[2])
 	}
 }
+
+func TestEvalCFColorsTreatsBareColumnAsRelative(t *testing.T) {
+	values := map[[2]int]string{
+		{10, 16}: "50",  // P10
+		{10, 17}: "150", // Q10
+	}
+	lookup := lookupFromValues(values)
+	prog := CFRow{Blocks: []CFBlock{{
+		C1: 16, C2: 17,
+		Rules: []CFRule{{
+			Attrs:    ` type="expression" dxfId="1" priority="1" stopIfTrue="1"`,
+			Formulas: []string{`(ROUND(P#o0,0)<100)`},
+		}},
+	}}}
+	got := EvalCFColors(prog, 10, map[int]string{1: "#112233"}, lookup)
+	if got[16] != "#112233" {
+		t.Fatalf("P10 = %q, want #112233", got[16])
+	}
+	if got[17] != "" {
+		t.Fatalf("Q10 = %q, want no colour: the bare P column is relative to each cell", got[17])
+	}
+}

@@ -93,7 +93,13 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.3.6）
+本版更新（v2.3.7）
+  1. 修正 Local 条件格式的相对列引用：公式里的 P/Q/... 是相对当前单元格的列，
+     之前全部按 P 列计算，导致 CalcOH/CalcOH2 整行同色。
+  2. Local 导出颜色现在逐列跟随源文件，黄/蓝等区间与源文件一致。
+  3. 需要重新导入 Local 并重新整合，旧 Local 数据仍是之前保存的错误颜色。
+
+包含 v2.3.6 的改动
   1. 修正 Local 条件格式从错误的 Global 起始行解析的问题。
      Local 数据从第 4 行开始，之前按第 56 行解析，导致前部行颜色丢失。
   2. 三表导出 Local 页的 CalcOH/CalcOH2 颜色现在与源 Local 文件一致。
