@@ -454,6 +454,14 @@ func readSheetCFRows(path string) (map[int]CFRow, error) {
 // conditional formats too; without this the Local sheet in the three-table
 // export lost the colours the source file shows.
 func readSheetCFRowsFor(path, sheet string) (map[int]CFRow, error) {
+	return readSheetCFRowsFrom(path, sheet, FirstDataRow)
+}
+
+// readSheetCFRowsFrom is the same with an explicit first data row. Local sheets
+// put their first data row near the top (row 4), not below the 55-row Global
+// template decoration; parsing them with the Global anchor dropped every rule
+// for the first items and left a large part of the Local sheet uncoloured.
+func readSheetCFRowsFrom(path, sheet string, fromRow int) (map[int]CFRow, error) {
 	part, err := SheetPartPath(path, sheet)
 	if err != nil {
 		return nil, err
@@ -462,7 +470,7 @@ func readSheetCFRowsFor(path, sheet string) (map[int]CFRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseCFRows(raw)
+	return ParseCFRowsFrom(raw, fromRow)
 }
 
 // readDxfColors reads the workbook's differential fill colours. Conditional

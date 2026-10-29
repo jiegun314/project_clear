@@ -93,7 +93,13 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.3.5）
+本版更新（v2.3.6）
+  1. 修正 Local 条件格式从错误的 Global 起始行解析的问题。
+     Local 数据从第 4 行开始，之前按第 56 行解析，导致前部行颜色丢失。
+  2. 三表导出 Local 页的 CalcOH/CalcOH2 颜色现在与源 Local 文件一致。
+  3. 已导入的 Local 数据需要重新导入，才能补存前部行的 CF 颜色。
+
+包含 v2.3.5 的改动
   1. Local 文件读取补上条件格式（CF）颜色计算。
   2. 三表导出的 Local 页在 CalcOH / CalcOH2 行上保留与源 Local 文件一致的颜色。
   3. 2.3.5 之前导入的 Local 数据集没有保存 CF 颜色，需要重新导入 Local 才能带出。

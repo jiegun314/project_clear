@@ -259,3 +259,25 @@ func firstN(s string, n int) string {
 	}
 	return s[:n]
 }
+
+func TestParseCFRowsFromUsesTheLocalDataRow(t *testing.T) {
+	// Local workbooks put their first data row at 4, not below the Global
+	// template's 55-row decoration. Parsing with the Global anchor used to drop
+	// every Local rule before row 56, which is exactly the first items in the
+	// Local sheet.
+	xml := []byte(`<worksheet><conditionalFormatting sqref="P13:AO13"><cfRule type="expression" dxfId="1" priority="1"><formula>(ROUND(P13,0)&lt;P15)</formula></cfRule></conditionalFormatting></worksheet>`)
+	local, err := ParseCFRowsFrom(xml, LocalDataRow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(local[13].Blocks) == 0 {
+		t.Fatal("row 13 was dropped by the Local anchor")
+	}
+	global, err := ParseCFRows(xml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(global[13].Blocks) != 0 {
+		t.Fatal("the Global anchor unexpectedly kept row 13")
+	}
+}

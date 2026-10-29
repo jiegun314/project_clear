@@ -141,7 +141,7 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 	// Conditional formats are the source of the signal colours on CalcOH rows.
 	// Local workbooks use them just like Global ones; capture and evaluate them
 	// here so the Local sheet keeps the same colours as its source file.
-	cfByRow, cfErr := readSheetCFRowsFor(path, sheet)
+	cfByRow, cfErr := readSheetCFRowsFrom(path, sheet, LocalDataRow)
 	var dxfColors map[int]string
 	if cfErr == nil {
 		var dxfErr error
