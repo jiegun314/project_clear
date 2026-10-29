@@ -550,6 +550,9 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 	if len(local.Header.Weeks) == 0 {
 		return nil, fmt.Errorf("本地文件没有周列")
 	}
+	for _, warning := range local.Warnings {
+		s.log.Warn("本地", "%s: %s", name, warning)
+	}
 	week := local.Header.FirstWeekCode()
 	ws, err := s.workspaceLocked()
 	if err != nil {

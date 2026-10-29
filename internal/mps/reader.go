@@ -446,7 +446,15 @@ func readHeader(f *excelize.File, readCols int) (Header, error) {
 
 // ReadSheetCFRows exposes the conditional-format capture for testing.
 func readSheetCFRows(path string) (map[int]CFRow, error) {
-	part, err := SheetPartPath(path, SheetName)
+	return readSheetCFRowsFor(path, SheetName)
+}
+
+// readSheetCFRowsFor reads the per-row conditional-format program of any sheet.
+// The Local reader uses it because Local workbooks paint CalcOH rows with
+// conditional formats too; without this the Local sheet in the three-table
+// export lost the colours the source file shows.
+func readSheetCFRowsFor(path, sheet string) (map[int]CFRow, error) {
+	part, err := SheetPartPath(path, sheet)
 	if err != nil {
 		return nil, err
 	}
@@ -455,4 +463,14 @@ func readSheetCFRows(path string) (map[int]CFRow, error) {
 		return nil, err
 	}
 	return ParseCFRows(raw)
+}
+
+// readDxfColors reads the workbook's differential fill colours. Conditional
+// format rules reference these by index.
+func readDxfColors(path string) (map[int]string, error) {
+	styles, err := zipPart(path, "xl/styles.xml")
+	if err != nil {
+		return nil, err
+	}
+	return DxfFillColors(ParseDxfs(styles)), nil
 }

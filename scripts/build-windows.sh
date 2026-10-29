@@ -93,7 +93,12 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.3.4）
+本版更新（v2.3.5）
+  1. Local 文件读取补上条件格式（CF）颜色计算。
+  2. 三表导出的 Local 页在 CalcOH / CalcOH2 行上保留与源 Local 文件一致的颜色。
+  3. 2.3.5 之前导入的 Local 数据集没有保存 CF 颜色，需要重新导入 Local 才能带出。
+
+包含 v2.3.4 的改动
   1. 参数设定的 LOC 筛选拆分为 Global 和 Local 两项。
      Global 默认 WH_CNB；Local 默认 WH_CNB,WH_CNS。
   2. 多个筛选项用英文逗号分隔，加载时忽略每项两侧空格，匹配不区分大小写。

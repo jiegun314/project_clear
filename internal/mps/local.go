@@ -78,6 +78,9 @@ type LocalSheet struct {
 	// the LOC filter.
 	RowsTotal int `json:"rowsTotal"`
 	RowsKept  int `json:"rowsKept"`
+	// Warnings are cosmetic losses while reading (currently conditional-format
+	// colours); the data remains usable.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ReadLocalFile opens a 本地 MPS workbook and checks its layout before reading rows.
@@ -135,6 +138,29 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 			comments[row][col] = Comment{Text: c.Text, Author: c.Author}
 		}
 	}
+	// Conditional formats are the source of the signal colours on CalcOH rows.
+	// Local workbooks use them just like Global ones; capture and evaluate them
+	// here so the Local sheet keeps the same colours as its source file.
+	cfByRow, cfErr := readSheetCFRowsFor(path, sheet)
+	var dxfColors map[int]string
+	if cfErr == nil {
+		var dxfErr error
+		dxfColors, dxfErr = readDxfColors(path)
+		if dxfErr != nil {
+			cfErr = dxfErr
+		}
+	}
+	if cfErr != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("条件格式读取失败（Local 颜色将缺失）: %v", cfErr))
+	}
+	cfLookup := func(row, col int) string {
+		if row >= 1 && row <= len(rows) && col >= 1 && col <= len(rows[row-1]) {
+			return rows[row-1][col-1]
+		}
+		v, _ := f.GetCellValue(sheet, CellRef(col, row), excelize.Options{RawCellValue: true})
+		return v
+	}
+
 	// Week columns in the order they appear, so Rows.Weeks lines up with the header
 	// even if a blank cell leaves a gap.
 	var weekCols []int
@@ -191,6 +217,17 @@ func ReadLocalFile(path string, opt ReadOptions) (*LocalSheet, error) {
 		for i, col := range weekCols {
 			dr.Weeks = append(dr.Weeks, localCell(row, col+1))
 			dr.StyleIDs[IndexCols+i] = localStyleID(f, sheet, dict, styleCache, col+1, r+1)
+		}
+		if len(dxfColors) > 0 {
+			if prog, ok := cfByRow[r+1]; ok && !prog.Empty() {
+				colors := EvalCFColors(prog, r+1, dxfColors, cfLookup)
+				if len(colors) > 0 {
+					dr.CFColors = make([]string, len(weekCols))
+					for i, col := range weekCols {
+						dr.CFColors[i] = colors[col+1]
+					}
+				}
+			}
 		}
 		for localCol, c := range comments[r+1] {
 			mpsCol := 0
