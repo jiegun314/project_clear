@@ -93,7 +93,11 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.3.7）
+本版更新（v2.3.8）
+  1. 升级 Wails 到 v2.17.1，包含安全修复与依赖更新。
+  2. 功能、界面和数据结构不变，不需要重新导入或重新整合。
+
+包含 v2.3.7 的改动
   1. 修正 Local 条件格式的相对列引用：公式里的 P/Q/... 是相对当前单元格的列，
      之前全部按 P 列计算，导致 CalcOH/CalcOH2 整行同色。
   2. Local 导出颜色现在逐列跟随源文件，黄/蓝等区间与源文件一致。
