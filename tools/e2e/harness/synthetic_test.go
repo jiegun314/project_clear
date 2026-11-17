@@ -114,8 +114,14 @@ func writeSyntheticSource(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 
-	// Data from row 58. Row L is the LOC filter column.
-	rows := []struct {
+	// Data from row 58. Row L is the LOC filter column. Each ITEM/warehouse
+	// needs a complete 14-element group now that imports enforce that invariant.
+	elementFields := []string{
+		"AdjDmd", "SchedRcpts", "PlanOrders", "DeployIn", "DeployOut",
+		"AdjInbound", "AdjOutbound", "ProxyDemand", "ProxySupply",
+		"CalcOH", "CalcOH2", "SS", "WOS", "BackOrder $",
+	}
+	items := []struct {
 		index []string
 		loc   string
 		weeks []float64
@@ -127,28 +133,32 @@ func writeSyntheticSource(t *testing.T, dir string) string {
 		{[]string{"P5", "P4", "P3", "P2", "P1", "GROUP B", "CLASS 2", "DESCR D", "ITEM-0004", "US-4", "EU-4"}, "OTHER_WH", []float64{999, 999}},
 	}
 	firstData := mps.FirstDataRow
-	for i, row := range rows {
-		r := firstData + i
-		for c, v := range row.index {
-			col, _ := mps.ColumnName(c + 1)
-			if err := f.SetCellValue(sheet, col+strconv.Itoa(r), v); err != nil {
+	r := firstData
+	for _, item := range items {
+		for _, field := range elementFields {
+			for c, v := range item.index {
+				col, _ := mps.ColumnName(c + 1)
+				if err := f.SetCellValue(sheet, col+strconv.Itoa(r), v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := f.SetCellValue(sheet, "L"+strconv.Itoa(r), item.loc); err != nil {
 				t.Fatal(err)
 			}
-		}
-		if err := f.SetCellValue(sheet, "L"+strconv.Itoa(r), row.loc); err != nil {
-			t.Fatal(err)
-		}
-		// Column O carries the element type even though its header reads LOC.
-		if err := f.SetCellValue(sheet, "O"+strconv.Itoa(r), "AdjDmd"); err != nil {
-			t.Fatal(err)
-		}
-		for w, v := range row.weeks {
-			col, _ := mps.ColumnName(mps.FirstWeekCol + w)
-			if err := f.SetCellValue(sheet, col+strconv.Itoa(r), v); err != nil {
+			// Column O carries the element type even though its header reads LOC.
+			if err := f.SetCellValue(sheet, "O"+strconv.Itoa(r), field); err != nil {
 				t.Fatal(err)
 			}
+			for w, v := range item.weeks {
+				col, _ := mps.ColumnName(mps.FirstWeekCol + w)
+				if err := f.SetCellValue(sheet, col+strconv.Itoa(r), v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r++
 		}
 	}
+	lastData := r - 1
 
 	// A conditional format over the week columns of the two kept rows, so the
 	// rule rewriting and the dxf re-interning are exercised.
@@ -159,7 +169,7 @@ func writeSyntheticSource(t *testing.T, dir string) string {
 	if err != nil {
 		t.Fatalf("conditional style: %v", err)
 	}
-	cfRange := "P" + strconv.Itoa(firstData) + ":" + lastCol + strconv.Itoa(firstData+len(rows)-1)
+	cfRange := "P" + strconv.Itoa(firstData) + ":" + lastCol + strconv.Itoa(lastData)
 	if err := f.SetConditionalFormat(sheet, cfRange, []excelize.ConditionalFormatOptions{{
 		Type:     "cell",
 		Criteria: ">",
@@ -205,23 +215,39 @@ func writeSyntheticLocal(t *testing.T, dir string) string {
 			t.Fatal(err)
 		}
 	}
-	rows := [][]string{
-		{"P5", "P4", "P3", "P2", "P1", "GROUP A", "CLASS 1", "DESCR A", "ITEM-0001", "B1", "S1", "US-1", "EU-1", "WH_CNB", "0", "10", "AdjDmd"},
-		{"P5", "P4", "P3", "P2", "P1", "GROUP B", "CLASS 2", "DESCR C", "ITEM-0003", "B3", "S3", "US-3", "EU-3", "WH_CNB", "0", "20", "AdjDmd"},
-		{"P5", "P4", "P3", "P2", "P1", "GROUP L", "CLASS L", "DESCR L", "ITEM-9001", "B9", "S9", "US-9", "EU-9", "WH_CNB", "0", "30", "AdjDmd"},
+	elementFields := []string{
+		"AdjDmd", "SchedRcpts", "PlanOrders", "DeployIn", "DeployOut",
+		"AdjInbound", "AdjOutbound", "ProxyDemand", "ProxySupply",
+		"CalcOH", "CalcOH2", "SS", "WOS", "BackOrder $",
 	}
-	for i, row := range rows {
-		for c, v := range row {
-			if err := f.SetCellStr(mps.LocalSheetName, mps.CellRef(c+1, mps.LocalDataRow+i), v); err != nil {
-				t.Fatal(err)
+	items := []struct {
+		index []string
+		loc   string
+		weeks []float64
+	}{
+		{[]string{"P5", "P4", "P3", "P2", "P1", "GROUP A", "CLASS 1", "DESCR A", "ITEM-0001", "B1", "S1"}, "WH_CNB", []float64{400, 410}},
+		{[]string{"P5", "P4", "P3", "P2", "P1", "GROUP B", "CLASS 2", "DESCR C", "ITEM-0003", "B3", "S3"}, "WH_CNB", []float64{420, 430}},
+		{[]string{"P5", "P4", "P3", "P2", "P1", "GROUP L", "CLASS L", "DESCR L", "ITEM-9001", "B9", "S9"}, "WH_CNB", []float64{440, 450}},
+	}
+	r := mps.LocalDataRow
+	for _, item := range items {
+		for _, field := range elementFields {
+			row := append([]string{}, item.index...)
+			row = append(row, "US", "EU", item.loc, "0", "10", field)
+			for c, v := range row {
+				if err := f.SetCellStr(mps.LocalSheetName, mps.CellRef(c+1, r), v); err != nil {
+					t.Fatal(err)
+				}
 			}
-		}
-		for w := range weeks {
-			if err := f.SetCellValue(mps.LocalSheetName, mps.CellRef(mps.LocalFirstWeekCol+w, mps.LocalDataRow+i), float64(400+i*10+w)); err != nil {
-				t.Fatal(err)
+			for w, v := range item.weeks {
+				if err := f.SetCellValue(mps.LocalSheetName, mps.CellRef(mps.LocalFirstWeekCol+w, r), v); err != nil {
+					t.Fatal(err)
+				}
 			}
+			r++
 		}
 	}
+
 	path := filepath.Join(dir, "BW_CN_MPS Week39 2026 (Month End).xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("save local: %v", err)

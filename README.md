@@ -76,7 +76,10 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 2. 核对「已导入文件」；缺少文件就点「添加 Global 源文件」补进来。
 3. 需要时删掉同名旧文件重新添加——同名文件只保留一份，后加的覆盖旧数据。
 4. 点 **完成 Global 导入**，得到 Global 数据集 `v1`。
+   Global 写入后会自动清理：同一 ITEM + 仓库只保留一套 14 个字段；不完整组删除；
+   多文件重复时保留源文件创建时间较新的一组，同一文件重复保留第一组。
 5. **导入本地 MPS**：选择 `BW_CN_MPS … (Month End).xlsx`；格式不合格会拒绝并指出位置。
+   Local 导入后也会按同一 ITEM + 仓库清理，只保留一套完整 14 个字段组。
 6. 两份完成后点 **整合**，汇总窗口列出合并 / Global / Local 三份行数。
 7. 工具栏 **导出** 写三表工作簿（MPS / Local / Global，默认名 `BW_CN_MPS Week39 2026.xlsx`）。
 8. 完成 Global 导入或导入 Local 后，该周立即出现在左下角历史数据；整合前显示 Global / Local，整合后增加整合行。历史数据里可单独查看和导出每一份数据。
@@ -167,11 +170,11 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 ```bash
 # macOS（Apple Silicon）
 ./scripts/build-darwin.sh
-# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.3.8-darwin-arm64.zip
+# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.3.9-darwin-arm64.zip
 
 # Windows（在 Windows 上）
 ./scripts/build-windows.sh
-# 产物：dist/CLEAR-2.3.8-windows-amd64.zip
+# 产物：dist/CLEAR-2.3.9-windows-amd64.zip
 ```
 
 构建脚本会在 `wails build -clean` 前把 `build/bin/data` 与 `build/bin/config` 暂存到 `build/.clear-build-stash`，
@@ -249,7 +252,7 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 
 ## 10. 版本
 
-当前版本 **2.3.8**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
+当前版本 **2.3.9**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
 2.1.1 修复「导入本地 MPS 文件」误打开文件夹选择器的问题；
 2.1.2 修复完成 Global 导入或 Local 导入后、未整合时不出现在历史数据里的问题；
 2.1.3 把主数据清单更名为「数据工作台」；
@@ -274,4 +277,6 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
        与原始 Local 文件一致；
 2.3.6 修正 Local 条件格式按 Global 数据起始行解析的问题，Local 前部数据的颜色不再丢失；
 2.3.7 修正 Local 条件格式相对列引用：每个周列按自己的列计算颜色，不再整行同色；
-2.3.8 升级 Wails v2.16.0 → v2.17.1（安全与依赖修复，功能行为不变）。
+2.3.8 升级 Wails v2.16.0 → v2.17.1（安全与依赖修复，功能行为不变）；
+2.3.9 导入后按 ITEM + 仓库清理数据：只保留一套完整的 14 个字段组；
+      重复完整组优先保留创建时间较新的文件，同一文件保留第一组；不完整组整组删除。

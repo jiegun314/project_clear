@@ -416,6 +416,20 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 		s.log.Error("临时数据", "写入失败: %v", err)
 		return nil, err
 	}
+	stats, err := s.cleanDraftLocked(draft.ID)
+	if err != nil {
+		s.log.Error("数据清理", "清理失败: %v", err)
+		return nil, err
+	}
+	if stats.DroppedRows > 0 {
+		s.log.Warn("数据清理", "%s", stats.summary())
+		res.Warnings = append(res.Warnings, stats.summary())
+	}
+	if stats.KeptRows == 0 {
+		_ = s.db.DiscardDraft(draft.ID)
+		return nil, fmt.Errorf("数据清理后没有完整的 14 行数据组，已丢弃本次导入")
+	}
+	res.RowCount = stats.KeptRows
 	if templateSrc != "" {
 		if err := s.storeTemplate(targetWeek, templateSrc); err != nil {
 			s.log.Warn("模板", "保存导出模板失败: %v", err)
@@ -424,7 +438,8 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 	}
 	s.activateLocked(targetWeek)
 	res.DatasetID = draft.ID
-	res.RowCount = len(rows)
+	res.RowsKept = stats.KeptRows
+	res.RowCount = stats.KeptRows
 	res.FileCount = res.OK
 	res.DurationMS = time.Since(start).Milliseconds()
 	src := logSource(action)
@@ -433,7 +448,7 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 		label += fmt.Sprintf("（基于已完成版本 %d 行）", baseRows)
 	}
 	s.log.Success(src, "已写入%s：%d 个文件，%d 行（周码 %s）；点「完成 Global 导入」后生效",
-		label, res.OK, res.RowsKept, targetWeek)
+		label, res.OK, stats.KeptRows, targetWeek)
 	if len(res.Warnings) > 0 {
 		s.log.Warn(src, "共 %d 条提示，详见日志", len(res.Warnings))
 	}
@@ -572,13 +587,22 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 			StyleIDs: r.StyleIDs, Comments: r.Comments, CFColors: r.CFColors,
 		})
 	}
+	warnings := []string{}
+	rows, stats := cleanImportRows(rows, func(string) time.Time { return fileCreatedAt(path) })
+	if stats.DroppedRows > 0 {
+		s.log.Warn("数据清理", "%s", stats.summary())
+		warnings = append(warnings, stats.summary())
+	}
+	if stats.KeptRows == 0 {
+		return nil, fmt.Errorf("数据清理后没有完整的 14 行数据组，本地文件未导入")
+	}
 	var size int64
 	if info, err := os.Stat(path); err == nil {
 		size = info.Size()
 	}
 	files := []store.StagedFile{{
 		Path: path, Name: name, Size: size, Status: "ok",
-		RowsTotal: local.RowsTotal, RowsKept: local.RowsKept, WeekCode: week,
+		RowsTotal: local.RowsTotal, RowsKept: len(rows), WeekCode: week,
 	}}
 
 	if progress != nil {
@@ -604,12 +628,12 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 		Expired: expired,
 		Files: []FileResult{{
 			Name: name, Path: path, Size: size, Status: "ok",
-			RowsTotal: local.RowsTotal, RowsKept: local.RowsKept, WeekCode: week,
+			RowsTotal: local.RowsTotal, RowsKept: len(rows), WeekCode: week,
 		}},
-		Warnings: []string{}, DurationMS: time.Since(start).Milliseconds(),
+		Warnings: warnings, DurationMS: time.Since(start).Milliseconds(),
 	}
 	s.log.Success("本地", "已导入 %s：Local v%d，%d 行（LOC=%s 命中 %d/%d 行），周码 %s",
-		name, d.Version, d.RowCount, cfg.LocalLOCFilter, local.RowsKept, local.RowsTotal, week)
+		name, d.Version, d.RowCount, cfg.LocalLOCFilter, len(rows), local.RowsTotal, week)
 	if expired {
 		s.log.Warn("本地", "周码 %s 的 Local 版本使已有整合（%s）过期；请重新整合", week, integrationAt)
 	}

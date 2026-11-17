@@ -57,6 +57,9 @@ type StagedFile struct {
 
 // StagedRow is one row waiting to be written to a dataset.
 type StagedRow struct {
+	// Seq is the stored row number when the row was read back from a dataset.
+	// It is ignored when writing a new row and lets cleanup drop individual rows.
+	Seq      int
 	FileName string
 	// FilePath identifies the workbook the row came from; callers that only set
 	// FileName still work because the id is then resolved by name.
@@ -645,19 +648,58 @@ func (s *Store) DatasetFiles(datasetID int64) ([]StagedFileDetail, error) {
 	return out, rows.Err()
 }
 
+// DeleteDatasetRows removes individual rows from a dataset, usually the rows a
+// data cleanup rejected. The remaining rows keep their seq values; only the
+// dataset counts change.
+func (s *Store) DeleteDatasetRows(datasetID int64, seqs []int) error {
+	if len(seqs) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	const batch = 400
+	for start := 0; start < len(seqs); start += batch {
+		end := start + batch
+		if end > len(seqs) {
+			end = len(seqs)
+		}
+		part := seqs[start:end]
+		ph := make([]string, len(part))
+		args := make([]any, 0, len(part)+1)
+		args = append(args, datasetID)
+		for i, seq := range part {
+			ph[i] = "?"
+			args = append(args, seq)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(
+			`DELETE FROM dataset_row WHERE dataset_id=? AND seq IN (%s)`,
+			strings.Join(ph, ",")), args...); err != nil {
+			return err
+		}
+	}
+	if err := refreshCountsTx(tx, datasetID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // DatasetRows reads a dataset in the shape a merge or an export needs.
 func (s *Store) DatasetRows(datasetID int64) ([]StagedRow, error) {
 	cfPatterns, err := s.LoadCFPatterns()
 	if err != nil {
 		return nil, err
 	}
-	cols := []string{"seq", "file_name", "src_row"}
+	cols := []string{"r.seq", "COALESCE(f.path,'')", "r.file_name", "r.src_row"}
 	for i := 1; i <= mps.IndexCols; i++ {
-		cols = append(cols, fmt.Sprintf("c%d", i))
+		cols = append(cols, fmt.Sprintf("r.c%d", i))
 	}
-	cols = append(cols, "weeks", "style_ids", "cf_id", "comments", "cf_colors")
-	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM dataset_row WHERE dataset_id=? ORDER BY seq`,
-		strings.Join(cols, ",")), datasetID)
+	cols = append(cols, "r.weeks", "r.style_ids", "r.cf_id", "r.comments", "r.cf_colors")
+	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM dataset_row r
+		LEFT JOIN dataset_file f ON f.id=r.file_id
+		WHERE r.dataset_id=? ORDER BY r.seq`, strings.Join(cols, ",")), datasetID)
 	if err != nil {
 		return nil, err
 	}
@@ -670,7 +712,7 @@ func (s *Store) DatasetRows(datasetID int64) ([]StagedRow, error) {
 		var cfID sql.NullInt64
 		var commentsJSON, cfColorsJSON sql.NullString
 		idx := make([]sql.NullString, mps.IndexCols)
-		scan := []any{&seq, &r.FileName, &r.SourceRow}
+		scan := []any{&seq, &r.FilePath, &r.FileName, &r.SourceRow}
 		for i := range idx {
 			scan = append(scan, &idx[i])
 		}
@@ -678,6 +720,7 @@ func (s *Store) DatasetRows(datasetID int64) ([]StagedRow, error) {
 		if err := rows.Scan(scan...); err != nil {
 			return nil, err
 		}
+		r.Seq = seq
 		for i := range idx {
 			r.Index[i] = idx[i].String
 		}
@@ -975,13 +1018,14 @@ func datasetRowsTx(q sqlQueryer, id int64) ([]StagedRow, error) {
 	}
 	cfRows.Close()
 
-	cols := []string{"seq", "file_name", "src_row"}
+	cols := []string{"r.seq", "COALESCE(f.path,'')", "r.file_name", "r.src_row"}
 	for i := 1; i <= mps.IndexCols; i++ {
-		cols = append(cols, fmt.Sprintf("c%d", i))
+		cols = append(cols, fmt.Sprintf("r.c%d", i))
 	}
-	cols = append(cols, "weeks", "style_ids", "cf_id", "comments", "cf_colors")
-	rows, err := q.Query(fmt.Sprintf(`SELECT %s FROM dataset_row WHERE dataset_id=? ORDER BY seq`,
-		strings.Join(cols, ",")), id)
+	cols = append(cols, "r.weeks", "r.style_ids", "r.cf_id", "r.comments", "r.cf_colors")
+	rows, err := q.Query(fmt.Sprintf(`SELECT %s FROM dataset_row r
+		LEFT JOIN dataset_file f ON f.id=r.file_id
+		WHERE r.dataset_id=? ORDER BY r.seq`, strings.Join(cols, ",")), id)
 	if err != nil {
 		return nil, err
 	}
@@ -994,7 +1038,7 @@ func datasetRowsTx(q sqlQueryer, id int64) ([]StagedRow, error) {
 		var cfID sql.NullInt64
 		var commentsJSON, cfColorsJSON sql.NullString
 		idx := make([]sql.NullString, mps.IndexCols)
-		scan := []any{&seq, &r.FileName, &r.SourceRow}
+		scan := []any{&seq, &r.FilePath, &r.FileName, &r.SourceRow}
 		for i := range idx {
 			scan = append(scan, &idx[i])
 		}
@@ -1002,6 +1046,7 @@ func datasetRowsTx(q sqlQueryer, id int64) ([]StagedRow, error) {
 		if err := rows.Scan(scan...); err != nil {
 			return nil, err
 		}
+		r.Seq = seq
 		for i := range idx {
 			r.Index[i] = idx[i].String
 		}
