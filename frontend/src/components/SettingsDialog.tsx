@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Form, InputNumber, Input, Radio, Alert, Typography, Button, Tooltip, Spin, Empty } from 'antd';
+import { Modal, Form, InputNumber, Input, Radio, Alert, Typography, Button, Tooltip, Spin, Empty, Switch } from 'antd';
 import { FolderCog, RotateCcw, Check, X } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 import { api } from '../services/api';
@@ -221,6 +221,25 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
               onChange={(e) => setCfg({ ...cfg, localLocFilter: e.target.value })}
               placeholder="WH_CNB,WH_CNS"
             />
+          </Form.Item>
+        </Section>
+
+        <Section>
+          <Form.Item
+            label="导入后清理零数据"
+            extra="同一 ITEM + 仓库的 AdjDmd 在所有周列都为 0（空值视同 0）时，删除整套 14 个字段"
+            style={{ marginBottom: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Switch
+                checked={cfg.cleanZeroData}
+                onChange={(checked) => setCfg({ ...cfg, cleanZeroData: checked })}
+                aria-label="清理零数据"
+              />
+              <span style={{ fontSize: 12, color: JNJ.textMuted }}>
+                {cfg.cleanZeroData ? '开启（默认）' : '关闭：保留全零数据组'}
+              </span>
+            </div>
           </Form.Item>
         </Section>
 

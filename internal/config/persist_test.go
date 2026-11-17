@@ -21,7 +21,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	// A client that echoes an empty marker, as an older webview would.
 	if _, err := store.Save(Config{
 		ConfigVersion: 0, ReadColumns: 61, PageSize: 200,
-		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, GlobalLOCFilter: "WH_CNB", LocalLOCFilter: "WH_CNB,WH_CNS",
+		HeaderDisplay: HeaderTwoRow, ExportMode: ExportTemplate, GlobalLOCFilter: "WH_CNB", LocalLOCFilter: "WH_CNB,WH_CNS", CleanZeroData: true,
 	}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 4") {
+	if !strings.Contains(string(raw), "configVersion: 5") {
 		t.Errorf("the marker was not stamped: %s", raw)
 	}
 
@@ -161,7 +161,7 @@ func TestVersionMigrationWithoutAChangeReportsNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clear.yaml")
 	// A current file; no migration or correction should have anything to say.
-	if err := os.WriteFile(path, []byte("configVersion: 4\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("configVersion: 5\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

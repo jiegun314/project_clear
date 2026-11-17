@@ -33,7 +33,7 @@ const mocked = vi.mocked(api);
 const mockedHasBackend = vi.mocked(hasBackend);
 
 const CONFIG: AppConfig = {
-  configVersion: 4, readColumns: 61, globalLocFilter: 'WH_CNB', localLocFilter: 'WH_CNB,WH_CNS', pageSize: 200,
+  configVersion: 5, readColumns: 61, globalLocFilter: 'WH_CNB', localLocFilter: 'WH_CNB,WH_CNS', cleanZeroData: true, pageSize: 200,
   headerDisplay: 'twoRow', exportMode: 'clean', exportDir: '',
 };
 

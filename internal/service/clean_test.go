@@ -139,7 +139,7 @@ func TestCleanDraftLockedDeletesRejectedRows(t *testing.T) {
 	if err := s.db.AddDraftData(d.ID, files, rows, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	stats, err := s.cleanDraftLocked(d.ID)
+	stats, err := s.cleanDraftLocked(d.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,5 +155,79 @@ func TestCleanDraftLockedDeletesRejectedRows(t *testing.T) {
 	}
 	if got[0].Seq != 0 || got[0].FilePath != "a.xlsx" {
 		t.Fatalf("seq/path not loaded: seq=%d path=%q", got[0].Seq, got[0].FilePath)
+	}
+}
+
+func TestCleanZeroDemandRowsDropsAllZeroGroups(t *testing.T) {
+	zero := fullGroup("ITEM-ZERO", "WH_CNB", "a.xlsx", "0")
+	for i := range zero {
+		zero[i].Weeks = []string{"0", "0.0", ""}
+	}
+	keep := fullGroup("ITEM-KEEP", "WH_CNB", "a.xlsx", "1")
+	zeroCNS := fullGroup("ITEM-ZERO", "WH_CNS", "a.xlsx", "5")
+	rows := append(append(zero, keep...), zeroCNS...)
+
+	kept, stats := cleanZeroDemandRows(rows)
+	if stats.Groups != 1 || stats.Rows != 14 {
+		t.Fatalf("stats = %+v", stats)
+	}
+	if len(kept) != 28 {
+		t.Fatalf("kept = %d rows, want 28", len(kept))
+	}
+	for _, r := range kept {
+		if r.Index[8] == "ITEM-ZERO" && r.Index[11] == "WH_CNB" {
+			t.Fatalf("zero group survived: %+v", r.Index)
+		}
+	}
+}
+
+func TestCleanZeroDemandRowsNeedsEveryWeekZero(t *testing.T) {
+	rows := fullGroup("ITEM-1", "WH_CNB", "a.xlsx", "0")
+	rows[0].Weeks = []string{"0", "1", "0"}
+	kept, stats := cleanZeroDemandRows(rows)
+	if len(kept) != 14 || stats.Groups != 0 {
+		t.Fatalf("kept=%d stats=%+v", len(kept), stats)
+	}
+}
+
+func TestCleanZeroDemandRowsLeavesIncompleteGroupsAlone(t *testing.T) {
+	rows := fullGroup("ITEM-1", "WH_CNB", "a.xlsx", "0")[:13]
+	kept, stats := cleanZeroDemandRows(rows)
+	if len(kept) != 13 || stats.Groups != 0 {
+		t.Fatalf("kept=%d stats=%+v", len(kept), stats)
+	}
+}
+
+func TestCleanDraftLockedCanSkipZeroCleanup(t *testing.T) {
+	s := newTestService(t)
+	d, err := s.db.BeginGlobalImport("2639", "2026-09-21", []string{"2639"}, testIndexNames, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := fullGroup("ITEM-1", "WH_CNB", "a.xlsx", "0")
+	files := []store.StagedFile{{Path: "a.xlsx", Name: "a.xlsx", Status: "ok", RowsTotal: len(rows), RowsKept: len(rows), WeekCode: "2639"}}
+	if err := s.db.AddDraftData(d.ID, files, rows, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.cleanDraftLocked(d.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.KeptRows != 14 || stats.ZeroGroups != 0 {
+		t.Fatalf("disabled cleanup changed rows: %+v", stats)
+	}
+	stats, err = s.cleanDraftLocked(d.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.KeptRows != 0 || stats.DroppedRows != 14 || stats.ZeroGroups != 1 {
+		t.Fatalf("enabled cleanup stats = %+v", stats)
+	}
+	got, err := s.db.DatasetRows(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("rows after zero cleanup = %d", len(got))
 	}
 }

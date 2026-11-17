@@ -2,7 +2,7 @@
 # 本文件由程序自动生成，可手工编辑；删除后重启程序会重新生成默认值。
 
 # 参数版本（程序用于把旧版本的默认值带过来，请勿手工修改）
-configVersion: 4
+configVersion: 5
 
 # 从 P 列开始读取的周数据列数（默认 61，覆盖 P..BX）
 readColumns: 61
@@ -12,6 +12,10 @@ globalLocFilter: "WH_CNB"
 
 # Local 文件的 LOC 筛选值（L 列）；多个值用英文逗号分隔
 localLocFilter: "WH_CNB,WH_CNS"
+
+# 是否在导入后清理零数据：同一 ITEM + 仓库的 AdjDmd 在全部周列都为 0 时，
+# 删除该 ITEM + 仓库的整套 14 个字段
+cleanZeroData: true
 
 # 主界面数据表格每页显示行数
 pageSize: 200

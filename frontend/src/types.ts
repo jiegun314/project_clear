@@ -190,6 +190,7 @@ export interface AppConfig {
   readColumns: number;
   globalLocFilter: string;
   localLocFilter: string;
+  cleanZeroData: boolean;
   pageSize: number;
   headerDisplay: 'twoRow' | 'oneRow';
   exportMode: 'template' | 'clean';

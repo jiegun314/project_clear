@@ -416,7 +416,7 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 		s.log.Error("临时数据", "写入失败: %v", err)
 		return nil, err
 	}
-	stats, err := s.cleanDraftLocked(draft.ID)
+	stats, err := s.cleanDraftLocked(draft.ID, cfg.CleanZeroData)
 	if err != nil {
 		s.log.Error("数据清理", "清理失败: %v", err)
 		return nil, err
@@ -427,7 +427,7 @@ func (s *Service) ingest(action string, paths []string, progress Progress, opts 
 	}
 	if stats.KeptRows == 0 {
 		_ = s.db.DiscardDraft(draft.ID)
-		return nil, fmt.Errorf("数据清理后没有完整的 14 行数据组，已丢弃本次导入")
+		return nil, fmt.Errorf("数据清理后没有可用的 14 行数据组，已丢弃本次导入")
 	}
 	res.RowCount = stats.KeptRows
 	if templateSrc != "" {
@@ -589,12 +589,15 @@ func (s *Service) ImportLocal(path string, progress Progress) (*ImportResult, er
 	}
 	warnings := []string{}
 	rows, stats := cleanImportRows(rows, func(string) time.Time { return fileCreatedAt(path) })
+	if cfg.CleanZeroData {
+		rows = applyZeroCleanup(rows, &stats)
+	}
 	if stats.DroppedRows > 0 {
 		s.log.Warn("数据清理", "%s", stats.summary())
 		warnings = append(warnings, stats.summary())
 	}
 	if stats.KeptRows == 0 {
-		return nil, fmt.Errorf("数据清理后没有完整的 14 行数据组，本地文件未导入")
+		return nil, fmt.Errorf("数据清理后没有可用的 14 行数据组，本地文件未导入")
 	}
 	var size int64
 	if info, err := os.Stat(path); err == nil {

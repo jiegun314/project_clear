@@ -58,6 +58,10 @@ type Config struct {
 	// LocalLOCFilter is the comma-separated LOC filter for Local workbooks.
 	// Local commonly contains more than one warehouse, hence the list.
 	LocalLOCFilter string `yaml:"localLocFilter" json:"localLocFilter"`
+	// CleanZeroData enables the second import cleanup: a complete group whose
+	// AdjDmd row is zero for every week is removed from the dataset. It is on by
+	// default.
+	CleanZeroData bool `yaml:"cleanZeroData" json:"cleanZeroData"`
 	// LOCFilter is the pre-v4 single filter, read only for migration. It is
 	// never written back.
 	LOCFilter string `yaml:"locFilter,omitempty" json:"-"`
@@ -78,7 +82,8 @@ type Config struct {
 // v3: the default read range grew to 61 weeks (P through BX) for the AO/BX
 // integration cutoff.
 // v4: the single LOC filter split into Global and Local filters.
-const currentConfigVersion = 4
+// v5: zero-demand cleanup became a setting, on by default.
+const currentConfigVersion = 5
 
 // Default returns the built-in parameter set, matching the specification.
 func Default() Config {
@@ -87,6 +92,7 @@ func Default() Config {
 		ReadColumns:     61,
 		GlobalLOCFilter: "WH_CNB",
 		LocalLOCFilter:  "WH_CNB,WH_CNS",
+		CleanZeroData:   true,
 		PageSize:        200,
 		HeaderDisplay:   HeaderTwoRow,
 		ExportMode:      ExportClean,
@@ -276,6 +282,11 @@ func migrateConfig(c *Config) (string, bool) {
 			note += "；"
 		}
 		note += "读取列数已提升到 61（覆盖 P–BX），整合时可选择截止 AO 或 BX"
+	}
+	if c.ConfigVersion < 5 {
+		// The field did not exist before v5, so its zero value is not a user
+		// choice. Turn the new default on when bringing an older file forward.
+		c.CleanZeroData = true
 	}
 	c.ConfigVersion = currentConfigVersion
 	return note, true

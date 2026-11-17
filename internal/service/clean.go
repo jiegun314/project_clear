@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,11 +22,16 @@ type cleanupStats struct {
 	DroppedRows      int
 	IncompleteGroups int
 	DuplicateGroups  int
+	ZeroGroups       int
 }
 
 func (s cleanupStats) summary() string {
-	return fmt.Sprintf("数据清理：%d 行 → %d 行，删除 %d 行（不完整组 %d 个，重复完整组 %d 个）",
+	msg := fmt.Sprintf("数据清理：%d 行 → %d 行，删除 %d 行（不完整组 %d 个，重复完整组 %d 个",
 		s.InputRows, s.KeptRows, s.DroppedRows, s.IncompleteGroups, s.DuplicateGroups)
+	if s.ZeroGroups > 0 {
+		msg += fmt.Sprintf("，零数据组 %d 个", s.ZeroGroups)
+	}
+	return msg + "）"
 }
 
 // cleanImportRows keeps exactly one complete 14-row group for every
@@ -145,7 +151,7 @@ func cleanImportRows(rows []store.StagedRow, createdAt func(file string) time.Ti
 // cleanDraftLocked applies cleanImportRows to every row currently in a Global
 // draft. It is called after the draft has been written, so an add sees both the
 // copied base rows and the new files.
-func (s *Service) cleanDraftLocked(datasetID int64) (cleanupStats, error) {
+func (s *Service) cleanDraftLocked(datasetID int64, cleanZero bool) (cleanupStats, error) {
 	rows, err := s.db.DatasetRows(datasetID)
 	if err != nil {
 		return cleanupStats{}, err
@@ -165,6 +171,9 @@ func (s *Service) cleanDraftLocked(datasetID int64) (cleanupStats, error) {
 		return fileCreatedAt(file)
 	}
 	kept, stats := cleanImportRows(rows, resolve)
+	if cleanZero {
+		kept = applyZeroCleanup(kept, &stats)
+	}
 	if stats.DroppedRows == 0 {
 		return stats, nil
 	}
@@ -182,4 +191,103 @@ func (s *Service) cleanDraftLocked(datasetID int64) (cleanupStats, error) {
 		return stats, err
 	}
 	return stats, nil
+}
+
+// zeroCleanupStats counts the groups removed by the zero-demand pass.
+type zeroCleanupStats struct {
+	Groups int
+	Rows   int
+}
+
+// cleanZeroDemandRows removes a complete group when its AdjDmd row is zero for
+// every week. The group is identified by ITEM + first LOC (warehouse); every
+// row of that group is removed, including the other 13 fields.
+//
+// A blank week cell is treated as zero: it carries no demand, which is what
+// this cleanup is for. A non-numeric value, or any non-zero number, keeps the
+// group. Rows that are not part of an exact 14-row group are left alone.
+func cleanZeroDemandRows(rows []store.StagedRow) ([]store.StagedRow, zeroCleanupStats) {
+	type keyGroup struct {
+		indices []int
+	}
+	groups := map[string]*keyGroup{}
+	order := []string{}
+	for i := range rows {
+		item := strings.TrimSpace(rows[i].Index[8])
+		warehouse := strings.TrimSpace(rows[i].Index[11])
+		if item == "" || warehouse == "" {
+			continue
+		}
+		key := item + "\x00" + warehouse
+		g := groups[key]
+		if g == nil {
+			g = &keyGroup{}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.indices = append(g.indices, i)
+	}
+
+	drop := make([]bool, len(rows))
+	stats := zeroCleanupStats{}
+	for _, key := range order {
+		g := groups[key]
+		if len(g.indices) != dataGroupRows {
+			continue
+		}
+		zero := false
+		for _, idx := range g.indices {
+			if strings.TrimSpace(rows[idx].Index[14]) != "AdjDmd" {
+				continue
+			}
+			zero = weeksAllZero(rows[idx].Weeks)
+			break
+		}
+		if !zero {
+			continue
+		}
+		stats.Groups++
+		for _, idx := range g.indices {
+			drop[idx] = true
+			stats.Rows++
+		}
+	}
+
+	out := make([]store.StagedRow, 0, len(rows)-stats.Rows)
+	for i, row := range rows {
+		if !drop[i] {
+			out = append(out, row)
+		}
+	}
+	return out, stats
+}
+
+// weeksAllZero reports whether every week is zero. Blank cells count as zero;
+// anything that cannot be parsed as a number, and any non-zero number, keeps
+// the group.
+func weeksAllZero(values []string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		n, err := strconv.ParseFloat(value, 64)
+		if err != nil || n != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// applyZeroCleanup runs the second cleanup pass and folds its counts into the
+// import summary.
+func applyZeroCleanup(rows []store.StagedRow, stats *cleanupStats) []store.StagedRow {
+	kept, zero := cleanZeroDemandRows(rows)
+	stats.KeptRows = len(kept)
+	stats.DroppedRows += zero.Rows
+	stats.ZeroGroups += zero.Groups
+	return kept
 }

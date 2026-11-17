@@ -4,10 +4,11 @@ import type { AppConfig, FilesView, Status } from '../types';
 
 /** Used until the backend answers, so the first paint has something to render. */
 const DEFAULT_CONFIG: AppConfig = {
-  configVersion: 2,
+  configVersion: 5,
   readColumns: 61,
   globalLocFilter: 'WH_CNB',
   localLocFilter: 'WH_CNB,WH_CNS',
+  cleanZeroData: true,
   pageSize: 200,
   headerDisplay: 'twoRow',
   exportMode: 'clean',

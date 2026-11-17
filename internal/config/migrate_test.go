@@ -33,7 +33,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 4") || !strings.Contains(string(raw), "exportMode: clean") {
+	if !strings.Contains(string(raw), "configVersion: 5") || !strings.Contains(string(raw), "exportMode: clean") {
 		t.Errorf("upgraded file = %s", raw)
 	}
 
@@ -61,4 +61,22 @@ func mentions(notes []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestCleanZeroDataDefaultsOnAndMigratesOldFiles(t *testing.T) {
+	if !Default().CleanZeroData {
+		t.Fatal("cleanZeroData should default to true")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clear.yaml")
+	if err := os.WriteFile(path, []byte("configVersion: 4\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, _, err := NewStoreAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.Get().CleanZeroData {
+		t.Fatal("an old settings file should inherit the on-by-default cleanup")
+	}
 }

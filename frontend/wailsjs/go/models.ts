@@ -5,6 +5,7 @@ export namespace config {
 	    readColumns: number;
 	    globalLocFilter: string;
 	    localLocFilter: string;
+	    cleanZeroData: boolean;
 	    pageSize: number;
 	    headerDisplay: string;
 	    exportMode: string;
@@ -20,6 +21,7 @@ export namespace config {
 	        this.readColumns = source["readColumns"];
 	        this.globalLocFilter = source["globalLocFilter"];
 	        this.localLocFilter = source["localLocFilter"];
+	        this.cleanZeroData = source["cleanZeroData"];
 	        this.pageSize = source["pageSize"];
 	        this.headerDisplay = source["headerDisplay"];
 	        this.exportMode = source["exportMode"];
