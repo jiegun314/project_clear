@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Alert, Spin } from 'antd';
 import { Toolbar } from './components/Toolbar';
 import { DataGrid } from './components/DataGrid';
@@ -19,6 +20,7 @@ import { useAppActions } from './hooks/useAppActions';
 import { SPLIT_BAR, TOP_MIN_HEIGHT } from './lib/split';
 import { useSplitPane } from './hooks/useSplitPane';
 import { StatusBar } from './components/StatusBar';
+import { MasterDataView } from './components/MasterDataView';
 
 export default function App() {
   const backend = useBackendState();
@@ -27,6 +29,7 @@ export default function App() {
   // opens the dialog it reports through.
   const actions = useAppActions(backend, tasks);
   const split = useSplitPane();
+  const [screen, setScreen] = useState<'workbench' | 'master'>('workbench');
 
   const status = backend.status;
   const canIntegrate = Boolean(
@@ -60,6 +63,10 @@ export default function App() {
     );
   }
 
+  if (screen === 'master') {
+    return <MasterDataView onClose={() => setScreen('workbench')} />;
+  }
+
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: JNJ.bg }}>
       <Toolbar
@@ -80,6 +87,7 @@ export default function App() {
         onClear={actions.runDiscardDraft}
         onExport={() => void actions.runToolbarExport()}
         onViewFiles={actions.openFiles}
+        onMaster={() => setScreen('master')}
         onSettings={actions.openSettings}
         onAbout={actions.openAbout}
         onQuit={actions.runQuit}

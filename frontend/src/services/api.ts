@@ -20,6 +20,12 @@ import type {
   GridResult,
   ImportResult,
   LogEntry,
+  MasterImportResult,
+  MasterInput,
+  MasterOverview,
+  MasterPage,
+  MasterQuery,
+  MasterTable,
   Status,
 } from '../types';
 
@@ -46,6 +52,11 @@ interface AppBindings {
   GetConfig(): Promise<ConfigView>;
   SaveConfig(c: AppConfig): Promise<string[]>;
   ResetConfig(): Promise<ConfigView>;
+  GetMasterOverview(): Promise<MasterOverview>;
+  QueryMasterData(q: MasterQuery): Promise<MasterPage>;
+  SaveMasterRow(input: MasterInput): Promise<void>;
+  DeleteMasterRow(table: MasterTable, key: string): Promise<void>;
+  ImportMasterWorkbook(): Promise<MasterImportResult | null>;
   GetLogs(limit: number): Promise<LogEntry[]>;
   ClearLogs(): Promise<void>;
   Quit(): Promise<void>;
@@ -103,6 +114,11 @@ export const api = {
   getArchive: () => app().GetArchive(),
   getYears: () => app().GetYears(),
   getWeeks: (year: number) => app().GetWeeks(year),
+  getMasterOverview: () => app().GetMasterOverview(),
+  queryMasterData: (q: MasterQuery) => app().QueryMasterData(q),
+  saveMasterRow: (input: MasterInput) => app().SaveMasterRow(input),
+  deleteMasterRow: (table: MasterTable, key: string) => app().DeleteMasterRow(table, key),
+  importMasterWorkbook: () => app().ImportMasterWorkbook(),
   getConfig: () => app().GetConfig(),
   saveConfig: (c: AppConfig) => app().SaveConfig(c),
   resetConfig: () => app().ResetConfig(),

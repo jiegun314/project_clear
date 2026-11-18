@@ -60,12 +60,13 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 
 | 区域 | 内容 |
 | --- | --- |
-| 工具栏 | Global 组：导入文件夹 / 添加源文件 / **完成 Global 导入** / 已导入文件（含清空草稿）；Local 组：导入本地 MPS；整合与产出：整合 / 导出；参数、关于、退出 |
+| 工具栏 | Global 组：导入文件夹 / 添加源文件 / **完成 Global 导入** / 已导入文件（含清空草稿）；Local 组：导入本地 MPS；整合与产出：整合 / 导出；主数据、参数、关于、退出 |
 | 工作区状态条 | 当前周、Global 草稿或完成版本、Local 版本与文件名、整合状态（含已过期）、丢弃本周导入 |
 | 整合数据（上） | 显示当前选中数据集；标题栏明确标出 `Global 草稿` / `Global 数据 vN` / `Local 数据 vN` / `整合数据 vN`，过期时标「整合已过期」；可搜索、排序、分页；周数据带源文件颜色与备注 |
 | 已导入文件 | 位于 Global 组内，只列当前 Global（或草稿）的文件、每个文件的行数、读取失败原因；左侧数据集列固定为 `Global`，右侧状态列为 `导入中`（草稿）/ `已导入`（已完成）/ `读取失败`，不带整合的过期信息；Local 是一次完成的单文件，文件信息显示在状态条 |
 | 历史数据（下左） | 按年份/周查询所有**已完成导入**的周（未整合也显示）：未整合时两行 Global / Local，整合后增加整合行；可分别查看与导出；Global / Local 显示最新版本，过期时只有整合行标「已过期」，周级也提示 |
 | 运行日志（下右） | 导入、完成、整合、导出、丢弃、报错 |
+| 主数据 | 独立页面，维护 Item → Base、Base → SAP、SAP → 分类三张本地映射表；支持搜索、分页、逐行增删改、整本工作簿覆盖导入；`产品价格` 页为后续价格工作簿预留 |
 | 状态栏 | 当前周 Global / Local 行数、已整合周数与行数、参数、数据库位置 |
 
 ---
@@ -91,6 +92,12 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 
 **重做**：重新导入同一周的数据，完成后再整合一次即可；旧的整合版本在历史里仍可查，直到被新整合取代。
 
+**主数据（代码匹配）**：工具栏「主数据」打开独立页面。三张表分别是 Item → Base、Base → SAP、SAP → 分类，
+只在本机维护，覆盖当前值，不会回溯改写已经导入的历史周。可以用「导入匹配工作簿」一次覆盖三张表：
+工作簿按表头识别工作表，只读取 Item Code / BASECODE、Base code / Manu Planning Code / SAP Code、Code / Category；
+D–Q 的公式列不会导入。未分类、孤儿 Base、未使用分类都是正常状态，只做提示，不阻断导入或编辑。
+`产品价格` 页当前只保留位置，价格工作簿将作为独立模块维护。
+
 ---
 
 ## 4. 数据与安全
@@ -100,7 +107,7 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 数据库位置：macOS `build/bin/data/clear.db`（打包后位于 `CLEAR.app` 同级），Windows 在程序目录的 `data/clear.db`。
 程序只读写这个文件；`wails build -clean` 会清空 `build/bin`，打包脚本已处理数据的暂存与归还。
 
-结构版本 **v5**：
+结构版本 **v6**：
 
 | 表 | 用途 |
 | --- | --- |
@@ -108,9 +115,14 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 | `dataset_row` | 数据行：A–O、周值 JSON、样式、条件格式、批注 |
 | `dataset_file` | 数据集包含的源文件记录 |
 | `integration` | 每周一条：当前引用的 Global / Local / 合并数据集与整合时间 |
+| `master_item_base` | Item → Base 映射，Item 唯一 |
+| `master_base_code` | Base → Manu / SAP 映射，Base 唯一 |
+| `master_sap_category` | SAP → 分类映射，SAP 唯一 |
+| `master_audit` | 主数据导入、增删改的审计记录 |
 
 旧版本（v4 及以前）的 `archive`、按周数据表和暂存表会在首次启动时自动迁移到 `dataset` / `dataset_row` / `integration`；
 迁移前自动生成 `clear.db.v4.bak`，旧表随后删除。未完成的历史暂存数据按「启动丢弃草稿」规则丢弃。
+v6 新增主数据四张表；首次启动自动创建，不迁移旧数据。
 
 ### 4.2 数据安全规则
 
@@ -174,11 +186,11 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
 ```bash
 # macOS（Apple Silicon）
 ./scripts/build-darwin.sh
-# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.3.11-darwin-arm64.zip
+# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.4.0-darwin-arm64.zip
 
 # Windows（在 Windows 上）
 ./scripts/build-windows.sh
-# 产物：dist/CLEAR-2.3.11-windows-amd64.zip
+# 产物：dist/CLEAR-2.4.0-windows-amd64.zip
 ```
 
 构建脚本会在 `wails build -clean` 前把 `build/bin/data` 与 `build/bin/config` 暂存到 `build/.clear-build-stash`，
@@ -219,7 +231,7 @@ app_staging.go            导入 / 添加 / 完成 / 整合 / 丢弃 / 文件清
 app_status.go             状态、关于
 app_export.go             导出
 app_settings.go           参数
-internal/store            SQLite v5：dataset / dataset_row / dataset_file / integration
+internal/store            SQLite v6：dataset / dataset_row / dataset_file / integration / 主数据表
 internal/service          导入、完成、Local、整合、过期、导出编排
 internal/mps              读写、合并、导出、三表
 internal/view             绑定的 JSON 载荷
@@ -247,7 +259,7 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 不会。它只删未完成的 Global 草稿；已完成的导入与历史整合不受影响。
 
 **旧的 `clear.db` 能直接用吗？**
-可以。首次启动会自动迁移到 v5，并留下 `clear.db.v4.bak`。旧版未完成的暂存数据会被丢弃。
+可以。首次启动会自动迁移到 v6，并留下 `clear.db.v4.bak`。旧版未完成的暂存数据会被丢弃。
 
 **导出的文件为什么没有最新数据？**
 如果状态显示「已过期」，导出的是上次整合结果；重新点「整合」后再导出。
@@ -256,7 +268,7 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 
 ## 10. 版本
 
-当前版本 **2.3.11**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
+当前版本 **2.4.0**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
 2.1.1 修复「导入本地 MPS 文件」误打开文件夹选择器的问题；
 2.1.2 修复完成 Global 导入或 Local 导入后、未整合时不出现在历史数据里的问题；
 2.1.3 把主数据清单更名为「数据工作台」；
@@ -286,4 +298,7 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
       重复完整组优先保留创建时间较新的文件，同一文件保留第一组；不完整组整组删除；
 2.3.10 数据清理版本正式发布；功能与 2.3.9 一致，补充 WK46 全量数据验证；
 2.3.11 参数设定新增「导入后清理零数据」开关（默认开启）：Global / Local 导入后，
-       同一 ITEM + 仓库的 AdjDmd 在所有周列均为 0（空值视同 0）时删除整套 14 个字段。
+       同一 ITEM + 仓库的 AdjDmd 在所有周列均为 0（空值视同 0）时删除整套 14 个字段；
+2.4.0 新增「主数据」页面：维护 Item → Base、Base → SAP、SAP → 分类三张本机映射表，
+       支持工作簿覆盖导入、搜索分页、逐行增删改和审计；未分类/孤儿/未使用分类只提示不阻断；
+       预留「产品价格」页，数据库升级到 v6。

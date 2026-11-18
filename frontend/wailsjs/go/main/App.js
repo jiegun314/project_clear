@@ -18,6 +18,10 @@ export function Commit(arg1) {
   return window['go']['main']['App']['Commit'](arg1);
 }
 
+export function DeleteMasterRow(arg1, arg2) {
+  return window['go']['main']['App']['DeleteMasterRow'](arg1, arg2);
+}
+
 export function DiscardDraft() {
   return window['go']['main']['App']['DiscardDraft']();
 }
@@ -62,6 +66,10 @@ export function GetLogs(arg1) {
   return window['go']['main']['App']['GetLogs'](arg1);
 }
 
+export function GetMasterOverview() {
+  return window['go']['main']['App']['GetMasterOverview']();
+}
+
 export function GetStatus() {
   return window['go']['main']['App']['GetStatus']();
 }
@@ -82,8 +90,16 @@ export function ImportLocalMPS() {
   return window['go']['main']['App']['ImportLocalMPS']();
 }
 
+export function ImportMasterWorkbook() {
+  return window['go']['main']['App']['ImportMasterWorkbook']();
+}
+
 export function QueryData(arg1) {
   return window['go']['main']['App']['QueryData'](arg1);
+}
+
+export function QueryMasterData(arg1) {
+  return window['go']['main']['App']['QueryMasterData'](arg1);
 }
 
 export function Quit() {
@@ -104,4 +120,8 @@ export function RevealExport(arg1) {
 
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
+}
+
+export function SaveMasterRow(arg1) {
+  return window['go']['main']['App']['SaveMasterRow'](arg1);
 }

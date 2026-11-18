@@ -1,4 +1,4 @@
--- CLEAR local database schema (v5).
+-- CLEAR local database schema (v6).
 --
 -- A week is built from two independent inputs and one integration:
 --
@@ -127,3 +127,40 @@ CREATE TABLE IF NOT EXISTS template (
   stored_path TEXT    NOT NULL,
   created_at  TEXT    NOT NULL
 );
+
+-- Master data: the code-matching tables and the SAP category table. They are
+-- maintained on this machine only, overwritten in place, and never referenced by
+-- historical week rows: an old week keeps the codes it was imported with.
+CREATE TABLE IF NOT EXISTS master_item_base (
+  item_code  TEXT PRIMARY KEY,
+  base_code  TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_master_item_base_base ON master_item_base(base_code);
+
+CREATE TABLE IF NOT EXISTS master_base_code (
+  base_code  TEXT PRIMARY KEY,
+  manu_code  TEXT NOT NULL DEFAULT '',
+  sap_code   TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_master_base_code_sap ON master_base_code(sap_code);
+
+CREATE TABLE IF NOT EXISTS master_sap_category (
+  sap_code   TEXT PRIMARY KEY,
+  category   TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+
+-- One row per import or edit. before/after hold a JSON snapshot of the row (or
+-- the import counts), so an accidental overwrite can be explained later.
+CREATE TABLE IF NOT EXISTS master_audit (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  table_name TEXT NOT NULL,
+  key_value  TEXT NOT NULL,
+  action     TEXT NOT NULL,
+  before_json TEXT NOT NULL DEFAULT '',
+  after_json  TEXT NOT NULL DEFAULT '',
+  changed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_master_audit_time ON master_audit(changed_at);

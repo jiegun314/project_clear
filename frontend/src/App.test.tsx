@@ -11,6 +11,8 @@ import type {
   GridResult,
   ImportResult,
   Status,
+  MasterOverview,
+  MasterPage,
 } from './types';
 
 vi.mock('./services/api', () => ({
@@ -23,6 +25,8 @@ vi.mock('./services/api', () => ({
     getArchive: vi.fn(), getYears: vi.fn(), getWeeks: vi.fn(),
     getLogs: vi.fn(), clearLogs: vi.fn(), getAppInfo: vi.fn(),
     saveConfig: vi.fn(), resetConfig: vi.fn(),
+    getMasterOverview: vi.fn(), queryMasterData: vi.fn(), saveMasterRow: vi.fn(),
+    deleteMasterRow: vi.fn(), importMasterWorkbook: vi.fn(),
   },
   hasBackend: vi.fn(() => true),
   onEvent: vi.fn(() => () => {}),
@@ -86,6 +90,17 @@ const HEADER: GridHeader = {
 
 const EMPTY: GridResult = { rows: [], total: 0, page: 1, pageSize: 200 };
 
+const MASTER_OVERVIEW: MasterOverview = {
+  itemCount: 5224, baseCount: 5854, sapCount: 1756, categoryCount: 33,
+  uncategorized: 1504, orphanCount: 161, unusedCategories: 38,
+  categories: ['A', 'B'], lastImportAt: '2026-11-18 22:00:00',
+};
+
+const MASTER_PAGE: MasterPage = {
+  rows: [{ table: 'item', key: 'I-1', itemCode: 'I-1', baseCode: 'B-1', updatedAt: '2026-11-18 22:00:00' }],
+  total: 1, page: 1, pageSize: 50,
+};
+
 const IMPORT_RESULT: ImportResult = {
   action: 'import', weekCode: '2639', weekStart: '2026-09-21', weekCodes: [], indexNames: [],
   total: 13, ok: 13, failed: 0, rowsKept: 1516, files: [], warnings: [], durationMs: 23714,
@@ -136,6 +151,8 @@ beforeEach(() => {
   mocked.exportBundle.mockResolvedValue(EXPORT_RESULT);
   mocked.discardDraft.mockResolvedValue({ ...IMPORT_RESULT, action: 'discard', fileCount: 13, rowCount: 1516 });
   mocked.discardWeekImports.mockResolvedValue({ weekCode: '2639', datasets: 2 });
+  mocked.getMasterOverview.mockResolvedValue(MASTER_OVERVIEW);
+  mocked.queryMasterData.mockResolvedValue(MASTER_PAGE);
 });
 
 async function renderApp(waitForText = '2639 · Global v2 1,516 / Local v1 1,736') {
@@ -324,6 +341,19 @@ describe('App', () => {
     mocked.getGridHeader.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '查看 Local 数据' }));
     await waitFor(() => expect(mocked.getGridHeader).toHaveBeenCalledWith(12));
+  });
+
+  it('opens the master-data page and returns to the workbench', async () => {
+    render(<App />);
+    await waitFor(() => expect(mocked.getStatus).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /主数据/ }));
+
+    expect(await screen.findByText('主数据')).toBeTruthy();
+    expect(screen.getByText('I-1')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回数据工作台' }));
+    expect(await screen.findByRole('button', { name: /主数据/ })).toBeTruthy();
   });
 
   it('asks before quitting', async () => {

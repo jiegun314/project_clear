@@ -56,6 +56,183 @@ export namespace logging {
 
 }
 
+export namespace master {
+	
+	export class ImportResult {
+	    path: string;
+	    name: string;
+	    items: number;
+	    bases: number;
+	    categories: number;
+	    duplicateRows: number;
+	    orphans: number;
+	    uncategorized: number;
+	    warnings: string[];
+	    importedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.items = source["items"];
+	        this.bases = source["bases"];
+	        this.categories = source["categories"];
+	        this.duplicateRows = source["duplicateRows"];
+	        this.orphans = source["orphans"];
+	        this.uncategorized = source["uncategorized"];
+	        this.warnings = source["warnings"];
+	        this.importedAt = source["importedAt"];
+	    }
+	}
+	export class Input {
+	    table: string;
+	    originalKey: string;
+	    itemCode: string;
+	    baseCode: string;
+	    manuCode: string;
+	    sapCode: string;
+	    category: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Input(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.table = source["table"];
+	        this.originalKey = source["originalKey"];
+	        this.itemCode = source["itemCode"];
+	        this.baseCode = source["baseCode"];
+	        this.manuCode = source["manuCode"];
+	        this.sapCode = source["sapCode"];
+	        this.category = source["category"];
+	    }
+	}
+	export class Overview {
+	    itemCount: number;
+	    baseCount: number;
+	    sapCount: number;
+	    categoryCount: number;
+	    uncategorized: number;
+	    orphanCount: number;
+	    unusedCategories: number;
+	    categories: string[];
+	    lastImportAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Overview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.itemCount = source["itemCount"];
+	        this.baseCount = source["baseCount"];
+	        this.sapCount = source["sapCount"];
+	        this.categoryCount = source["categoryCount"];
+	        this.uncategorized = source["uncategorized"];
+	        this.orphanCount = source["orphanCount"];
+	        this.unusedCategories = source["unusedCategories"];
+	        this.categories = source["categories"];
+	        this.lastImportAt = source["lastImportAt"];
+	    }
+	}
+	export class Row {
+	    table: string;
+	    key: string;
+	    itemCode?: string;
+	    baseCode?: string;
+	    manuCode?: string;
+	    sapCode?: string;
+	    category?: string;
+	    uncategorized?: boolean;
+	    orphan?: boolean;
+	    unused?: boolean;
+	    refCount?: number;
+	    updatedAt?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Row(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.table = source["table"];
+	        this.key = source["key"];
+	        this.itemCode = source["itemCode"];
+	        this.baseCode = source["baseCode"];
+	        this.manuCode = source["manuCode"];
+	        this.sapCode = source["sapCode"];
+	        this.category = source["category"];
+	        this.uncategorized = source["uncategorized"];
+	        this.orphan = source["orphan"];
+	        this.unused = source["unused"];
+	        this.refCount = source["refCount"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class Page {
+	    rows: Row[];
+	    total: number;
+	    page: number;
+	    pageSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Page(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rows = this.convertValues(source["rows"], Row);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Query {
+	    table: string;
+	    page: number;
+	    pageSize: number;
+	    search: string;
+	    filter: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Query(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.table = source["table"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.search = source["search"];
+	        this.filter = source["filter"];
+	    }
+	}
+
+}
+
 export namespace mps {
 	
 	export class Week {

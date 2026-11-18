@@ -11,6 +11,7 @@ import {
   Settings,
   Info,
   Power,
+  BookOpen,
 } from 'lucide-react';
 import { JNJ } from '../theme/jnj';
 
@@ -33,6 +34,7 @@ export interface ToolbarProps {
   onClear: () => void;
   onExport: () => void;
   onViewFiles: () => void;
+  onMaster: () => void;
   onSettings: () => void;
   onAbout: () => void;
   onQuit: () => void;
@@ -116,6 +118,7 @@ export function Toolbar(p: ToolbarProps) {
   ];
 
   const appActions: Action[] = [
+    { key: 'master', icon: <BookOpen size={18} />, label: '主数据：维护 Item / Base / SAP 分类匹配表', onClick: p.onMaster },
     { key: 'settings', icon: <Settings size={18} />, label: '参数设定', onClick: p.onSettings },
     { key: 'about', icon: <Info size={18} />, label: '关于', onClick: p.onAbout },
     { key: 'quit', icon: <Power size={18} />, label: '退出程序', onClick: p.onQuit },

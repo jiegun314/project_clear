@@ -3,6 +3,7 @@
 import {service} from '../models';
 import {view} from '../models';
 import {logging} from '../models';
+import {master} from '../models';
 import {store} from '../models';
 import {config} from '../models';
 
@@ -13,6 +14,8 @@ export function AddFiles():Promise<service.ImportResult>;
 export function ClearLogs():Promise<void>;
 
 export function Commit(arg1:number):Promise<view.CommitResult>;
+
+export function DeleteMasterRow(arg1:string,arg2:string):Promise<void>;
 
 export function DiscardDraft():Promise<service.ImportResult>;
 
@@ -36,6 +39,8 @@ export function GetGridHeader(arg1:number):Promise<view.GridHeader>;
 
 export function GetLogs(arg1:number):Promise<Array<logging.Entry>>;
 
+export function GetMasterOverview():Promise<master.Overview>;
+
 export function GetStatus():Promise<view.Status>;
 
 export function GetWeeks(arg1:number):Promise<Array<number>>;
@@ -46,7 +51,11 @@ export function ImportFolder():Promise<service.ImportResult>;
 
 export function ImportLocalMPS():Promise<service.ImportResult>;
 
+export function ImportMasterWorkbook():Promise<master.ImportResult>;
+
 export function QueryData(arg1:view.GridQuery):Promise<store.GridResult>;
+
+export function QueryMasterData(arg1:master.Query):Promise<master.Page>;
 
 export function Quit():Promise<void>;
 
@@ -57,3 +66,5 @@ export function ResetConfig():Promise<view.ConfigView>;
 export function RevealExport(arg1:string):Promise<void>;
 
 export function SaveConfig(arg1:config.Config):Promise<Array<string>>;
+
+export function SaveMasterRow(arg1:master.Input):Promise<void>;

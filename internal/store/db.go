@@ -32,7 +32,7 @@ const metaSchemaVersion = "schema_version"
 
 // currentSchemaVersion is the schema this release expects. It is bumped only
 // when schemaMigrations gains a step at the end.
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // annotationColumns are the per-cell extras added after 1.0. Both are nullable
 // TEXT: a database that predates them simply has no values.
@@ -56,6 +56,7 @@ var schemaMigrations = []func(sqlQueryer) error{
 	addArchiveDataset,         // 2 -> 3
 	addStagingDataset,         // 3 -> 4
 	addDatasetModel,           // 4 -> 5
+	addMasterData,             // 5 -> 6
 }
 
 // Store owns the database handle.

@@ -31,6 +31,7 @@ function renderToolbar(over: Partial<Parameters<typeof Toolbar>[0]> = {}) {
       onClear={noop}
       onExport={noop}
       onViewFiles={noop}
+      onMaster={noop}
       onSettings={noop}
       onAbout={noop}
       onQuit={noop}
@@ -101,6 +102,13 @@ describe('Toolbar', () => {
     expect(clear.hasAttribute('disabled')).toBe(false);
     fireEvent.click(clear);
     expect(onClear).toHaveBeenCalled();
+  });
+
+  it('opens the master-data page', () => {
+    const onMaster = vi.fn();
+    renderToolbar({ onMaster });
+    fireEvent.click(screen.getByRole('button', { name: '主数据：维护 Item / Base / SAP 分类匹配表' }));
+    expect(onMaster).toHaveBeenCalled();
   });
 
   it('calls the local import action', () => {

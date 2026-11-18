@@ -271,3 +271,71 @@ export interface AppInfo {
   goVersion: string;
   platform: string;
 }
+
+/** Master data: code matching and SAP category maintenance. */
+export type MasterTable = 'item' | 'base' | 'category';
+
+export interface MasterRow {
+  table: MasterTable;
+  key: string;
+  itemCode?: string;
+  baseCode?: string;
+  manuCode?: string;
+  sapCode?: string;
+  category?: string;
+  uncategorized?: boolean;
+  orphan?: boolean;
+  unused?: boolean;
+  refCount?: number;
+  updatedAt?: string;
+}
+
+export interface MasterQuery {
+  table: MasterTable;
+  page: number;
+  pageSize: number;
+  search: string;
+  filter: string;
+}
+
+export interface MasterPage {
+  rows: MasterRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface MasterOverview {
+  itemCount: number;
+  baseCount: number;
+  sapCount: number;
+  categoryCount: number;
+  uncategorized: number;
+  orphanCount: number;
+  unusedCategories: number;
+  categories: string[];
+  lastImportAt: string;
+}
+
+export interface MasterInput {
+  table: MasterTable;
+  originalKey: string;
+  itemCode: string;
+  baseCode: string;
+  manuCode: string;
+  sapCode: string;
+  category: string;
+}
+
+export interface MasterImportResult {
+  path: string;
+  name: string;
+  items: number;
+  bases: number;
+  categories: number;
+  duplicateRows: number;
+  orphans: number;
+  uncategorized: number;
+  warnings: string[];
+  importedAt: string;
+}
