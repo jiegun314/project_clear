@@ -390,7 +390,7 @@ func TestDiscardWeekImportsKeepsHistory(t *testing.T) {
 	}
 }
 
-func TestExportBundleWritesThreeSheets(t *testing.T) {
+func TestExportBundleWritesMonthEndPlusThreeSheets(t *testing.T) {
 	s := newTestService(t)
 	addGlobal(t, s, testRow("A", "100"), testRow("B", "200"))
 	addLocal(t, s, testRow("B", "250"), testRow("C", "300"))
@@ -402,7 +402,7 @@ func TestExportBundleWritesThreeSheets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Sheets != 3 || stats.Expired {
+	if stats.Sheets != 4 || stats.Expired {
 		t.Fatalf("stats = %+v", stats)
 	}
 	f, err := excelize.OpenFile(dest)
@@ -410,8 +410,58 @@ func TestExportBundleWritesThreeSheets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if got := f.GetSheetList(); len(got) != 3 || got[0] != "MPS" || got[1] != "Local" || got[2] != "Global" {
+	if got := f.GetSheetList(); len(got) != 4 || got[0] != "Month End" || got[1] != "MPS" || got[2] != "Local" || got[3] != "Global" {
 		t.Fatalf("sheets = %v", got)
+	}
+}
+
+func testGroup(item, warehouse string) []store.StagedRow {
+	rows := make([]store.StagedRow, 0, len(mps.MonthEndFields))
+	for _, field := range mps.MonthEndFields {
+		var idx [mps.IndexCols]string
+		copy(idx[:], testIndexNames)
+		idx[8] = item
+		idx[11] = warehouse
+		idx[14] = field
+		rows = append(rows, store.StagedRow{
+			FileName: "a.xlsm", FilePath: "/in/a.xlsm", SourceRow: 4,
+			Index: idx, Weeks: []string{"10"},
+		})
+	}
+	return rows
+}
+
+func TestExportBundleWritesMonthEndRows(t *testing.T) {
+	s := newTestService(t)
+	addGlobal(t, s, testGroup("I1", "WH_CNB")...)
+	addLocal(t, s, testGroup("I1", "WH_CNB")...)
+	if _, _, _, err := s.Commit(1); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "month-end.xlsx")
+	stats, err := s.ExportBundle(BundleExportOptions{WeekCode: "2639", DestPath: dest}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sheets != 4 || stats.Rows < 14 {
+		t.Fatalf("stats = %+v", stats)
+	}
+	f, err := excelize.OpenFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if got := f.GetSheetList(); len(got) != 4 || got[0] != "Month End" {
+		t.Fatalf("sheets = %v", got)
+	}
+	if got, _ := f.GetCellValue("Month End", "I6"); got != "I1" {
+		t.Errorf("I6 = %q", got)
+	}
+	if got, _ := f.GetCellValue("Month End", "R11"); got != "Month End INV" {
+		t.Errorf("R11 = %q", got)
+	}
+	if got, _ := f.GetCellValue("Month End", "R12"); got != "Month End Value" {
+		t.Errorf("R12 = %q", got)
 	}
 }
 

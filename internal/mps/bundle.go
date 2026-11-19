@@ -34,13 +34,16 @@ type BundleInput struct {
 	DestPath string
 	// Sheets are written in order. The business names them MPS, Local, Global.
 	Sheets []BundleSheet
+	// MonthEnd, when non-nil, is written as the first sheet. It carries the
+	// calculated Month End INV/Value rows and the extra A..R columns.
+	MonthEnd *MonthEndSheet
 }
 
-// BundleSheetNames are the sheet names and order of the three-table file, as the
+// BundleSheetNames are the sheet names and order of the integrated workbook, as the
 // business file has them.
-var BundleSheetNames = []string{"MPS", "Local", "Global"}
+var BundleSheetNames = []string{"Month End", "MPS", "Local", "Global"}
 
-// ExportBundle writes the three-table workbook: each sheet carries its dataset's
+// ExportBundle writes the integrated workbook: each sheet carries its dataset's
 // header row (A..O plus its week codes), the week start dates beneath it, a
 // spacer row, then the data.
 //
@@ -97,13 +100,32 @@ func ExportBundle(in BundleInput) (*ExportStats, error) {
 		return nil, err
 	}
 
-	stats := &ExportStats{Mode: "bundle", Sheets: len(in.Sheets), PreservedVBA: false}
-	for i, sheet := range in.Sheets {
-		if i > 0 {
+	stats := &ExportStats{Mode: "bundle", PreservedVBA: false}
+	stats.Sheets = len(in.Sheets)
+	if in.MonthEnd != nil {
+		stats.Sheets++
+	}
+	first := true
+	if in.MonthEnd != nil {
+		if err := f.SetSheetName(f.GetSheetName(0), "Month End"); err != nil {
+			return nil, fmt.Errorf("建立 Month End 工作表失败: %w", err)
+		}
+		if err := writeMonthEndSheet(f, *in.MonthEnd, headerStyle, dateStyle, spacerStyle, dataStyle); err != nil {
+			return nil, err
+		}
+		stats.Rows += len(in.MonthEnd.Rows)
+		if cols := MonthEndIndexCols + len(in.MonthEnd.Weeks); cols > stats.Cols {
+			stats.Cols = cols
+		}
+		first = false
+	}
+	for _, sheet := range in.Sheets {
+		if !first {
 			if _, err := f.NewSheet(sheet.Name); err != nil {
 				return nil, fmt.Errorf("建立工作表 %q 失败: %w", sheet.Name, err)
 			}
 		}
+		first = false
 		if err := writeBundleSheet(f, sheet, headerStyle, dateStyle, spacerStyle, dataStyle); err != nil {
 			return nil, err
 		}

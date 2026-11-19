@@ -81,10 +81,10 @@ Global 与 Local **完全独立、没有先后顺序**；整合必须等两份�
    多文件重复时保留源文件创建时间较新的一组，同一文件重复保留第一组。
    参数「导入后清理零数据」开启时（默认），如果该 ITEM + 仓库的 AdjDmd 在所有周列都是 0，
    整套 14 个字段会被删除；空值视同 0。
-5. **导入本地 MPS**：选择 `BW_CN_MPS … (Month End).xlsx`；格式不合格会拒绝并指出位置。
+5. **导入本地 MPS**：选择 Local 文件（旧版 Month End 布局或新版 Local A–O 布局均可）；格式不合格会拒绝并指出位置。
    Local 导入后也会按同一 ITEM + 仓库清理，只保留一套完整 14 个字段组，并执行同样的零数据清理。
 6. 两份完成后点 **整合**，汇总窗口列出合并 / Global / Local 三份行数。
-7. 工具栏 **导出** 写三表工作簿（MPS / Local / Global，默认名 `BW_CN_MPS Week39 2026.xlsx`）。
+7. 工具栏 **导出** 写整合工作簿（Month End / MPS / Local / Global，默认名 `BW_CN_MPS Week39 2026 (Month End).xlsx`）。
 8. 完成 Global 导入或导入 Local 后，该周立即出现在左下角历史数据；整合前显示 Global / Local，整合后增加整合行。历史数据里可单独查看和导出每一份数据。
 
 **换周**：当前周的导入尚未整合时，程序会拒绝导入另一周。先整合，或点「丢弃本周导入」清掉本周未整合的数据。
@@ -148,6 +148,7 @@ v6 新增主数据四张表；v7 新增独立的 `master_price` 价格表；均�
 | Global LOC 筛选 | 默认 `WH_CNB`；LOC 列不等于它的行会被过滤 |
 | Local LOC 筛选 | 默认 `WH_CNB,WH_CNS`；多个值用英文逗号分隔 |
 | 导入后清理零数据 | 默认开启；同一 ITEM + 仓库的 AdjDmd 在所有周列都为 0 时，删除整套 14 个字段（空值视同 0） |
+| Month End 汇率 | 默认 7.1788；Month End Value = Month End INV × 标准成本 ÷ 汇率 |
 | 每页行数 | 主表格每页行数 |
 | 表头显示 | 两行（业务含义 + 字段名）或一行 |
 | 导出模式 | 纯数据（`.xlsx`）/ 原文件格式（`.xlsm`，保留宏） |
@@ -156,24 +157,37 @@ v6 新增主数据四张表；v7 新增独立的 `master_price` 价格表；均�
 
 ## 6. 导出
 
-### 6.1 三表文件
+### 6.1 整合工作簿（Month End / MPS / Local / Global）
 
-整合之后，工具栏「导出」写一个工作簿：
+整合之后，工具栏「导出」写一个四表工作簿：
 
 | 工作表 | 内容 |
 | --- | --- |
+| Month End | 按月末周汇总的 Month End INV / Month End Value，行 1、2 为合计；见 6.2 |
 | MPS | 合并结果（Global 优先 + Local 补缺） |
 | Local | 本周 Local 数据集 |
 | Global | 本周 Global 数据集 |
 
-三张表使用同一套表头和周列，行数与各自数据集一致；字体、边框和批注会随数据写入三张表。
+MPS / Local / Global 三张表使用同一套表头和周列，行数与各自数据集一致；字体、边框和批注会随数据写入三张表。
 颜色按业务规则保留：第 1、2 行标题/日期行和第 3 行筛选行保留颜色；数据行只有 **O 列为 CalcOH 或 CalcOH2**
 的行，从 **P 列起**保留颜色；其余单元格使用默认无填充色。条件格式的信号色以静态底色保留。
 2.1.5 之前导入的 Local 数据集没有保存 Local 样式，重新导入一次 Local 后 Local / 合并页才会带出原 Local 的颜色和批注。
 
 **整合已过期时仍允许导出**：导出的是上次整合结果，界面会明确提示；需要最新结果请先重新整合。
 
-### 6.2 单份数据
+### 6.2 Month End
+
+Month End 页按 ITEM + 仓库的 14 行数据组计算，字段名和计算口径：
+
+- `AdjInbound` 改名为 `Month End INV`：当周 CalOH + 未来三周 SchedRcpts + 未来三周 DeployIn；
+- `AdjOutbound` 改名为 `Month End Value`：Month End INV × 标准成本 ÷ 汇率；
+- 标准成本按 ITEM → Base Code → SAP Code → 产品价格 的顺序查找；缺价格时 Value 记 0，并在导出日志中提示；
+- 只在 4-4-5 月末周（如 2026-11-16、2026-12-28）写入 INV / Value，其他周列留空；第 1、2 行分别为 Month End INV / Value 合计；
+- 行 3 表头、行 4 日期、行 5 空白、行 6 起为数据；右侧人工价格 mapping 不写入。
+
+汇率在**参数设定 → Month End 汇率**中修改，默认 7.1788。
+
+### 6.3 单份数据
 
 历史数据窗口可以把某个数据集单独导出为单页报表（纯数据或原文件格式）。
 如果该周只有 Local 数据、没有 Global 源模板，导出会自动按**纯数据**格式生成（没有原始样式可复制）。
@@ -190,11 +204,11 @@ v6 新增主数据四张表；v7 新增独立的 `master_price` 价格表；均�
 ```bash
 # macOS（Apple Silicon）
 ./scripts/build-darwin.sh
-# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.5.0-darwin-arm64.zip
+# 产物：build/bin/CLEAR.app 与 dist/CLEAR-2.6.0-darwin-arm64.zip
 
 # Windows（在 Windows 上）
 ./scripts/build-windows.sh
-# 产物：dist/CLEAR-2.5.0-windows-amd64.zip
+# 产物：dist/CLEAR-2.6.0-windows-amd64.zip
 ```
 
 构建脚本会在 `wails build -clean` 前把 `build/bin/data` 与 `build/bin/config` 暂存到 `build/.clear-build-stash`，
@@ -272,7 +286,7 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 
 ## 10. 版本
 
-当前版本 **2.5.0**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
+当前版本 **2.6.0**。2.1.0 把「导入 / 整合」重做为三个独立数据集步骤，数据库升级到 v5；
 2.1.1 修复「导入本地 MPS 文件」误打开文件夹选择器的问题；
 2.1.2 修复完成 Global 导入或 Local 导入后、未整合时不出现在历史数据里的问题；
 2.1.3 把主数据清单更名为「数据工作台」；
@@ -309,3 +323,6 @@ Global 还在草稿（先点「完成 Global 导入」），或 Local 还没导�
 2.5.0 完成「产品价格」主数据：新增独立 `master_price` 表与价格导入接口/页面；
        只读取 Material 与 Standard_Cost，保留前导零，空白成本显示为未定价，
        重复 Material 保留最后一行；价格导入不影响代码映射与历史周，数据库升级到 v7。
+2.6.0 新增 Month End 整合页：按 ITEM + 仓库的 14 行组计算 Month End INV / Value，
+       标准成本走 Item → Base → SAP → 价格主数据；导出工作簿变为 Month End / MPS / Local / Global 四表；
+       参数设定新增 Month End 汇率，默认 7.1788。

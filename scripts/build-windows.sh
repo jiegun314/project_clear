@@ -93,7 +93,15 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.5.0）
+本版更新（v2.6.0）
+  1. 导出工作簿新增 Month End 页：Month End / MPS / Local / Global 四张表。
+  2. Month End 按 ITEM + 仓库的 14 行数据组计算 Month End INV 与 Month End Value。
+  3. Month End INV = 当周 CalOH + 未来三周 SchedRcpts + 未来三周 DeployIn。
+  4. Month End Value = Month End INV × 标准成本 ÷ 汇率；汇率默认 7.1788，可在参数设定修改。
+  5. 标准成本按 Item → Base Code → SAP Code → 产品价格 查找；缺价格时 Value 记 0 并提示。
+  6. 第 1、2 行为 Month End INV / Value 合计，行 3 表头、行 4 日期、行 6 起数据。
+
+包含 v2.5.0 的改动
   1. 「产品价格」页正式上线，维护独立的 Material → Standard Cost 价格主数据。
   2. 支持导入 MATERIAL_MASTER 工作簿，只读取 Material 与 Standard_Cost 两列。
   3. Material 按文本保留前导零；Standard_Cost 按数字读入，空白保存为“未定价”。

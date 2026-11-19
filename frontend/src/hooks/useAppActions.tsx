@@ -292,19 +292,19 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
       {
         label: '内容',
         value:
-          r.sheets === 3
-            ? 'MPS / Local / Global（3 个工作表）'
+          r.sheets >= 4
+            ? 'Month End / MPS / Local / Global（4 个工作表）'
             : `${r.weekCode} · ${r.mode === 'clean' ? '纯数据' : '原文件格式'}`,
       },
-      r.sheets === 3
-        ? { label: '行数', value: `三表合计 ${r.rows.toLocaleString()} 行` }
+      r.sheets >= 4
+        ? { label: '行数', value: `整合表合计 ${r.rows.toLocaleString()} 行` }
         : { label: '行数', value: `${r.rows.toLocaleString()} 行 × ${r.cols} 列` },
       { label: '大小', value: size },
     ];
     if (r.expired) {
       items.push({ label: '提示', value: '该整合已过期，导出的是上次整合结果' });
     }
-    showSummary(r.sheets === 3 ? '三表文件已导出' : '数据已导出', items, r.expired ? 'neutral' : 'success');
+    showSummary(r.sheets >= 4 ? '整合表已导出' : '数据已导出', items, r.expired ? 'neutral' : 'success');
   };
 
   const runActivateWeek = async (weekCode: string): Promise<void> => {
@@ -366,7 +366,7 @@ export function useAppActions(backend: BackendState, tasks: TaskRunner): AppActi
 
   const runExportBundle = async (weekCode?: string): Promise<ExportResult | null> => {
     const week = weekCode?.trim() || backend.status?.activeWeek || '';
-    tasks.begin('导出三表', 0, 2);
+    tasks.begin('导出整合表', 0, 2);
     let ok = false;
     try {
       const r: ExportResult | null = await api.exportBundle(week);

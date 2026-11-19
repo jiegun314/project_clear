@@ -574,3 +574,34 @@ func (s *Store) DeleteMasterRow(table, key string) error {
 	}
 	return tx.Commit()
 }
+
+// MasterLookup returns the Item → Base → SAP → Category chain together with the
+// price attached to the SAP code. It is deliberately one query: the store has a
+// single SQLite connection, so issuing the joins separately while a cursor is
+// open would deadlock.
+func (s *Store) MasterLookup() (map[string]master.Lookup, error) {
+	rows, err := s.db.Query(`SELECT i.item_code, i.base_code,
+		COALESCE(b.sap_code,''), COALESCE(c.category,''), p.standard_cost
+		FROM master_item_base i
+		LEFT JOIN master_base_code b ON b.base_code = i.base_code
+		LEFT JOIN master_sap_category c ON c.sap_code = b.sap_code
+		LEFT JOIN master_price p ON p.material = b.sap_code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]master.Lookup{}
+	for rows.Next() {
+		var l master.Lookup
+		var cost sql.NullFloat64
+		if err := rows.Scan(&l.ItemCode, &l.BaseCode, &l.SapCode, &l.Category, &cost); err != nil {
+			return nil, err
+		}
+		if cost.Valid {
+			v := cost.Float64
+			l.StandardCost = &v
+		}
+		out[l.ItemCode] = l
+	}
+	return out, rows.Err()
+}

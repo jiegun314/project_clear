@@ -37,7 +37,7 @@ const mocked = vi.mocked(api);
 const mockedHasBackend = vi.mocked(hasBackend);
 
 const CONFIG: AppConfig = {
-  configVersion: 5, readColumns: 61, globalLocFilter: 'WH_CNB', localLocFilter: 'WH_CNB,WH_CNS', cleanZeroData: true, pageSize: 200,
+  configVersion: 6, readColumns: 61, globalLocFilter: 'WH_CNB', localLocFilter: 'WH_CNB,WH_CNS', cleanZeroData: true, exchangeRate: 7.1788, pageSize: 200,
   headerDisplay: 'twoRow', exportMode: 'clean', exportDir: '',
 };
 
@@ -125,12 +125,12 @@ const COMMIT_RESULT: CommitResult = {
 const EXPORT_RESULT: ExportResult = {
   destPath: '/tmp/BW.xlsx', datasetId: 100, weekCode: '2639', mode: 'clean', rows: 2580,
   cols: 17, comments: 0, cfRows: 0, stylesUsed: 0, dropped: 0, sizeBytes: 1000,
-  preservedVba: false, durationMs: 10, sheets: 3, expired: false,
+  preservedVba: false, durationMs: 10, sheets: 4, expired: false,
 };
 
 const FINISH = '完成 Global 导入：把当前草稿定稿为可整合的数据集';
 const COMMIT = '整合：合并已完成的 Global 与 Local，写入永久整合记录';
-const EXPORT = '导出：生成 MPS / Local / Global 三表文件';
+const EXPORT = '导出：生成 Month End / MPS / Local / Global 整合表';
 const CLEAR = '清空：丢弃未完成的 Global 导入';
 const IMPORT = '导入 Global 文件夹：读取本周 MPS 导出的全部源文件（生成草稿）';
 const LOCAL = '导入本地 MPS 文件（Month End）：检查格式并写入 Local 数据集';
@@ -298,7 +298,7 @@ describe('App', () => {
     await renderApp();
     fireEvent.click(screen.getByRole('button', { name: EXPORT }));
     await waitFor(() => expect(mocked.exportBundle).toHaveBeenCalledWith('2639'));
-    expect(await screen.findByText('三表文件已导出')).toBeTruthy();
+    expect(await screen.findByText('整合表已导出')).toBeTruthy();
     expect(screen.getByText('/tmp/BW.xlsx')).toBeTruthy();
   });
 

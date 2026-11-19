@@ -3,8 +3,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { Toolbar } from './Toolbar';
 
 const COMMIT = '整合：合并已完成的 Global 与 Local，写入永久整合记录';
-const EXPORT = '导出：生成 MPS / Local / Global 三表文件';
-const EXPORT_EXPIRED = '导出：生成三表文件（当前整合已过期，导出的是上次整合结果）';
+const EXPORT = '导出：生成 Month End / MPS / Local / Global 整合表';
+const EXPORT_EXPIRED = '导出：生成整合表（当前整合已过期，导出的是上次整合结果）';
 const FINISH = '完成 Global 导入：把当前草稿定稿为可整合的数据集';
 const IMPORT_LOCAL = '导入本地 MPS 文件（Month End）：检查格式并写入 Local 数据集';
 const CLEAR = '清空：丢弃未完成的 Global 导入';

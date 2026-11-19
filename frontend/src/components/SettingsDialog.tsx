@@ -244,6 +244,25 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
         </Section>
 
         <Section>
+          <Form.Item
+            label="Month End 汇率（人民币/美元）"
+            extra="Month End Value = Month End INV × 标准成本 ÷ 汇率；默认 7.1788"
+            style={{ marginBottom: 0 }}
+          >
+            <InputNumber
+              min={0.0001}
+              max={100}
+              step={0.0001}
+              precision={4}
+              value={cfg.exchangeRate}
+              onChange={(v) => setCfg({ ...cfg, exchangeRate: v ?? 7.1788 })}
+              style={{ width: '100%' }}
+              aria-label="Month End 汇率"
+            />
+          </Form.Item>
+        </Section>
+
+        <Section>
           <Form.Item label="每页显示行数" style={{ marginBottom: 0 }}>
             <InputNumber
               min={10}

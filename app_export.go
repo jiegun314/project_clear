@@ -68,8 +68,8 @@ func (a *App) Export(datasetID int64, mode string) (out *view.ExportResult, err 
 	}, nil
 }
 
-// ExportBundle asks where to save and writes the integrated week's three-table
-// workbook: MPS (merged), Local and Global.
+// ExportBundle asks where to save and writes the integrated week's workbook:
+// Month End, MPS (merged), Local and Global.
 func (a *App) ExportBundle(weekCode string) (out *view.ExportResult, err error) {
 	defer a.recoverFault("ExportBundle", &err)
 	if err := a.ready(); err != nil {
@@ -83,8 +83,8 @@ func (a *App) ExportBundle(weekCode string) (out *view.ExportResult, err error) 
 	if err != nil {
 		return nil, err
 	}
-	name := fmt.Sprintf("BW_CN_MPS Week%d %d.xlsx", w.WeekNo, w.FullYear())
-	dest, err := selectSavePath("导出三表文件（MPS / Local / Global）", name, a.lastDir(),
+	name := fmt.Sprintf("BW_CN_MPS Week%d %d (Month End).xlsx", w.WeekNo, w.FullYear())
+	dest, err := selectSavePath("导出整合文件（Month End / MPS / Local / Global）", name, a.lastDir(),
 		[]string{"xlsx"})
 	if err != nil {
 		return nil, err

@@ -1206,7 +1206,7 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 		{"Global", in.GlobalID.Int64},
 	}
 	if !in.GlobalID.Valid || !in.LocalID.Valid {
-		return nil, fmt.Errorf("周码 %s 是旧版整合（只有合并结果），无法导出三表；请在历史数据里单独导出", week)
+		return nil, fmt.Errorf("周码 %s 是旧版整合（只有合并结果），无法导出整合表；请在历史数据里单独导出", week)
 	}
 	if progress != nil {
 		progress("读取数据", 0, 2)
@@ -1224,6 +1224,7 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 	}
 	targetWeeks := parseWeekCodes(merged.WeekCodes)
 	sheets := make([]mps.BundleSheet, 0, 3)
+	var mergedRows []mps.ExportRow
 	for _, p := range parts {
 		d, rows, err := s.db.ExportRows(p.id)
 		if err != nil {
@@ -1232,6 +1233,7 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 		var bundleRows []mps.ExportRow
 		if p.id == in.MergedID {
 			bundleRows = toMPSRows(rows)
+			mergedRows = bundleRows
 		} else {
 			bundleRows = trimExportRows(rows, parseWeekCodes(d.WeekCodes), targetWeeks)
 		}
@@ -1240,13 +1242,34 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 			IndexNames: d.IndexNames, Rows: bundleRows, StyleByID: styles,
 		})
 	}
+	cfg := s.cfg.Get()
+	lookup, err := s.db.MasterLookup()
+	if err != nil {
+		return nil, err
+	}
+	prices := make(map[string]mps.MonthEndPrice, len(lookup))
+	for item, l := range lookup {
+		prices[item] = mps.MonthEndPrice{
+			BaseCode: l.BaseCode, SapCode: l.SapCode,
+			Category: l.Category, StandardCost: l.StandardCost,
+		}
+	}
+	monthEnd, err := mps.BuildMonthEnd(mps.MonthEndInput{
+		Weeks: targetWeeks, Rows: mergedRows, PriceByItem: prices,
+		ExchangeRate: cfg.ExchangeRate,
+	})
+	if err != nil {
+		return nil, err
+	}
 	if progress != nil {
 		progress("写入文件", 1, 2)
 	}
 	start := time.Now()
-	stats, err := mps.ExportBundle(mps.BundleInput{DestPath: opt.DestPath, Sheets: sheets})
+	stats, err := mps.ExportBundle(mps.BundleInput{
+		DestPath: opt.DestPath, Sheets: sheets, MonthEnd: monthEnd,
+	})
 	if err != nil {
-		s.log.Error("导出", "三表文件写入失败: %v", err)
+		s.log.Error("导出", "整合文件写入失败: %v", err)
 		return nil, err
 	}
 	stats.DurationMS = time.Since(start).Milliseconds()
@@ -1258,8 +1281,14 @@ func (s *Service) ExportBundle(opt BundleExportOptions, progress Progress) (*mps
 	if progress != nil {
 		progress("完成", 2, 2)
 	}
-	s.log.Success("导出", "三表文件 %s → %s（MPS %d 行 / Local %d 行 / Global %d 行）",
-		week, opt.DestPath, len(sheets[0].Rows), len(sheets[1].Rows), len(sheets[2].Rows))
+	s.log.Success("导出", "整合文件 %s → %s（Month End %d 行 / MPS %d 行 / Local %d 行 / Global %d 行）",
+		week, opt.DestPath, len(monthEnd.Rows), len(sheets[0].Rows), len(sheets[1].Rows), len(sheets[2].Rows))
+	if monthEnd.SkippedGroups > 0 {
+		s.log.Warn("导出", "Month End 有 %d 个不完整数据组未写入", monthEnd.SkippedGroups)
+	}
+	if monthEnd.MissingPrices > 0 {
+		s.log.Warn("导出", "Month End 有 %d 个 ITEM + 仓库没有标准成本，Month End Value 记为 0", monthEnd.MissingPrices)
+	}
 	if expired {
 		s.log.Warn("导出", "该周已有更新的导入，整合已过期；导出的是上次整合结果")
 	}

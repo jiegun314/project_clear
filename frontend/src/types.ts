@@ -191,6 +191,7 @@ export interface AppConfig {
   globalLocFilter: string;
   localLocFilter: string;
   cleanZeroData: boolean;
+  exchangeRate: number;
   pageSize: number;
   headerDisplay: 'twoRow' | 'oneRow';
   exportMode: 'template' | 'clean';

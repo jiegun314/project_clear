@@ -123,7 +123,7 @@ describe('HistoryView', () => {
     fireEvent.click(screen.getByRole('button', { name: /导出纯数据/ }));
     await waitFor(() => expect(onExport).toHaveBeenCalledWith(9, 'clean'));
 
-    fireEvent.click(screen.getByRole('button', { name: /导出三表（带颜色）/ }));
+    fireEvent.click(screen.getByRole('button', { name: /导出整合表（含 Month End）/ }));
     await waitFor(() => expect(onExportBundle).toHaveBeenCalledWith('2639'));
     // The bundle uses the week, so it still works when no workbench session is open.
     expect(onExport).toHaveBeenCalledTimes(1);
@@ -137,7 +137,7 @@ describe('HistoryView', () => {
 
     renderHistory(9, undefined, onExport, onExportBundle, 'global');
     await screen.findAllByText('ITEM-0001');
-    expect(screen.queryByRole('button', { name: /导出三表（带颜色）/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /导出整合表（含 Month End）/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /导出原文件格式/ }));
     await waitFor(() => expect(onExport).toHaveBeenCalledWith(9, 'template'));
   });

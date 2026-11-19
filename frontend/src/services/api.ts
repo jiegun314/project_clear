@@ -109,7 +109,7 @@ export const api = {
   getFiles: () => app().GetFiles(),
   /** One dataset as the single-sheet report; mode is "", "clean" or "template". */
   exportDataset: (datasetId: number, mode: string) => app().Export(datasetId, mode),
-  /** The integrated week's MPS / Local / Global workbook. */
+  /** The integrated week's Month End / MPS / Local / Global workbook. */
   exportBundle: (weekCode: string) => app().ExportBundle(weekCode),
   queryData: (q: GridQuery) => app().QueryData(q),
   getGridHeader: (datasetId: number) => app().GetGridHeader(datasetId),

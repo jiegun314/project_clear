@@ -187,6 +187,18 @@ type PriceImportResult struct {
 	ImportedAt    string   `json:"importedAt"`
 }
 
+// Lookup is the resolved code chain for one Item, used by the Month End
+// calculation. BaseCode/SapCode/Category are empty when a mapping is missing;
+// StandardCost is nil when the SAP code has no price. The row is present as
+// soon as the Item itself has a Base code.
+type Lookup struct {
+	ItemCode     string   `json:"itemCode"`
+	BaseCode     string   `json:"baseCode"`
+	SapCode      string   `json:"sapCode"`
+	Category     string   `json:"category"`
+	StandardCost *float64 `json:"standardCost,omitempty"`
+}
+
 // LookupResult is the read-only code-chain lookup.
 type LookupResult struct {
 	ItemCode string `json:"itemCode"`

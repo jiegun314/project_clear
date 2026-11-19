@@ -307,9 +307,9 @@ func Run(opt Options) error {
 	return nil
 }
 
-// auditBundle checks the three-table workbook: MPS, Local and Global in that
-// order, each with the business header, and the merged sheet holding every row
-// 整合 stored.
+// auditBundle checks the integrated workbook: Month End, MPS, Local and Global
+// in that order, each with its business header, and the merged sheet holding
+// every row 整合 stored.
 func (r *Runner) auditBundle(path string, mergedRows int) error {
 	f, err := excelize.OpenFile(path)
 	if err != nil {
@@ -326,18 +326,26 @@ func (r *Runner) auditBundle(path string, mergedRows int) error {
 		if err != nil {
 			return fmt.Errorf("读取 %s: %w", name, err)
 		}
-		if len(rows) < mps.FirstDataRowOfBundle {
+		headerRow := 1
+		dataRow := mps.FirstDataRowOfBundle
+		weekCol := mps.FirstWeekCol
+		if name == "Month End" {
+			headerRow = 3
+			dataRow = mps.MonthEndFirstDataRow
+			weekCol = mps.MonthEndIndexCols + 1
+		}
+		if len(rows) < dataRow {
 			return fmt.Errorf("%s 只有 %d 行, 缺少表头或数据", name, len(rows))
 		}
-		if got := rows[0][8]; got != "ITEM" {
-			return fmt.Errorf("%s I1 = %q, 期望 ITEM", name, got)
+		if got := rows[headerRow-1][8]; got != "ITEM" {
+			return fmt.Errorf("%s I%d = %q, 期望 ITEM", name, headerRow, got)
 		}
-		if got := rows[0][mps.FirstWeekCol-1]; got != "2639" {
-			return fmt.Errorf("%s P1 = %q, 期望周码 2639", name, got)
+		if got := rows[headerRow-1][weekCol-1]; got != "2639" {
+			return fmt.Errorf("%s week1 = %q, 期望周码 2639", name, got)
 		}
 		// The used range must cover the data: read_only readers trust it, so a
 		// dimension left at A1 makes the sheet look empty to them.
-		lastCol, err := mps.ColumnName(len(rows[0]))
+		lastCol, err := mps.ColumnName(len(rows[headerRow-1]))
 		if err != nil {
 			return err
 		}
@@ -347,14 +355,14 @@ func (r *Runner) auditBundle(path string, mergedRows int) error {
 			return fmt.Errorf("%s dimension: %w", name, err)
 		}
 		if dim != wantDim {
-			return fmt.Errorf("%s dimension = %q, 期望 %q（共 %d 行 × %d 列）", name, dim, wantDim, len(rows), len(rows[0]))
+			return fmt.Errorf("%s dimension = %q, 期望 %q（共 %d 行 × %d 列）", name, dim, wantDim, len(rows), len(rows[headerRow-1]))
 		}
-		data := len(rows) - (mps.FirstDataRowOfBundle - 1)
+		data := len(rows) - (dataRow - 1)
 		if data <= 0 {
 			return fmt.Errorf("%s 没有数据行", name)
 		}
 		if i == 0 && data != mergedRows {
-			return fmt.Errorf("MPS 页 %d 行, 整合结果 %d 行", data, mergedRows)
+			return fmt.Errorf("Month End 页 %d 行, 整合结果 %d 行", data, mergedRows)
 		}
 		r.mark("审计: %s 页 %d 行", name, data)
 	}

@@ -15,11 +15,12 @@ const { api } = await import('../services/api');
 const mocked = vi.mocked(api);
 
 const CONFIG: AppConfig = {
-  configVersion: 5,
+  configVersion: 6,
   readColumns: 61,
   globalLocFilter: 'WH_CNB',
   localLocFilter: 'WH_CNB,WH_CNS',
   cleanZeroData: true,
+  exchangeRate: 7.1788,
   pageSize: 200,
   headerDisplay: 'twoRow',
   exportMode: 'clean',
@@ -73,7 +74,7 @@ describe('SettingsDialog', () => {
 
     // The two numeric controls, in order, with their current values.
     const numbers = screen.getAllByRole('spinbutton') as HTMLInputElement[];
-    expect(numbers.map((n) => n.value)).toEqual(['61', '200']);
+    expect(numbers.map((n) => n.value)).toEqual(['61', '7.1788', '200']);
 
     // The two text controls.
     expect((screen.getAllByRole('textbox') as HTMLInputElement[]).map((n) => n.value)).toEqual([

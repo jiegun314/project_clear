@@ -110,8 +110,8 @@ export function Toolbar(p: ToolbarProps) {
       key: 'export',
       icon: <FileDown size={18} />,
       label: p.integrationExpired
-        ? '导出：生成三表文件（当前整合已过期，导出的是上次整合结果）'
-        : '导出：生成 MPS / Local / Global 三表文件',
+        ? '导出：生成整合表（当前整合已过期，导出的是上次整合结果）'
+        : '导出：生成 Month End / MPS / Local / Global 整合表',
       onClick: p.onExport,
       disabled: !p.hasIntegration,
     },

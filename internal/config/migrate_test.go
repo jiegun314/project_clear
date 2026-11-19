@@ -33,7 +33,7 @@ func TestExportModeDefaultMigratesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 5") || !strings.Contains(string(raw), "exportMode: clean") {
+	if !strings.Contains(string(raw), "configVersion: 6") || !strings.Contains(string(raw), "exportMode: clean") {
 		t.Errorf("upgraded file = %s", raw)
 	}
 
@@ -61,6 +61,24 @@ func mentions(notes []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestExchangeRateDefaultsAndMigrates(t *testing.T) {
+	if got := Default().ExchangeRate; got != 7.1788 {
+		t.Fatalf("default exchange rate = %v", got)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clear.yaml")
+	if err := os.WriteFile(path, []byte("configVersion: 5\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, _, err := NewStoreAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get().ExchangeRate; got != 7.1788 {
+		t.Fatalf("migrated exchange rate = %v", got)
+	}
 }
 
 func TestCleanZeroDataDefaultsOnAndMigratesOldFiles(t *testing.T) {

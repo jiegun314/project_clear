@@ -30,7 +30,7 @@ func TestSaveStampsTheCurrentConfigVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "configVersion: 5") {
+	if !strings.Contains(string(raw), "configVersion: 6") {
 		t.Errorf("the marker was not stamped: %s", raw)
 	}
 
@@ -161,7 +161,7 @@ func TestVersionMigrationWithoutAChangeReportsNothing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clear.yaml")
 	// A current file; no migration or correction should have anything to say.
-	if err := os.WriteFile(path, []byte("configVersion: 5\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("configVersion: 6\nreadColumns: 61\nglobalLocFilter: WH_CNB\nlocalLocFilter: WH_CNB,WH_CNS\nexportMode: clean\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

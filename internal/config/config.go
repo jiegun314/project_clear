@@ -62,6 +62,9 @@ type Config struct {
 	// AdjDmd row is zero for every week is removed from the dataset. It is on by
 	// default.
 	CleanZeroData bool `yaml:"cleanZeroData" json:"cleanZeroData"`
+	// ExchangeRate is the RMB per USD rate used by Month End Value. It defaults
+	// to 7.1788, the rate baked into the business sample.
+	ExchangeRate float64 `yaml:"exchangeRate" json:"exchangeRate"`
 	// LOCFilter is the pre-v4 single filter, read only for migration. It is
 	// never written back.
 	LOCFilter string `yaml:"locFilter,omitempty" json:"-"`
@@ -83,7 +86,8 @@ type Config struct {
 // integration cutoff.
 // v4: the single LOC filter split into Global and Local filters.
 // v5: zero-demand cleanup became a setting, on by default.
-const currentConfigVersion = 5
+// v6: Month End value uses a configurable exchange rate (default 7.1788).
+const currentConfigVersion = 6
 
 // Default returns the built-in parameter set, matching the specification.
 func Default() Config {
@@ -93,6 +97,7 @@ func Default() Config {
 		GlobalLOCFilter: "WH_CNB",
 		LocalLOCFilter:  "WH_CNB,WH_CNS",
 		CleanZeroData:   true,
+		ExchangeRate:    7.1788,
 		PageSize:        200,
 		HeaderDisplay:   HeaderTwoRow,
 		ExportMode:      ExportClean,
@@ -109,6 +114,10 @@ func (c *Config) Validate() []string {
 	if c.PageSize < 10 || c.PageSize > 5000 {
 		notes = append(notes, fmt.Sprintf("每页行数 %d 超出范围，已重置为 200", c.PageSize))
 		c.PageSize = 200
+	}
+	if c.ExchangeRate <= 0 || c.ExchangeRate > 100 {
+		notes = append(notes, fmt.Sprintf("汇率 %.4f 超出范围，已重置为 7.1788", c.ExchangeRate))
+		c.ExchangeRate = 7.1788
 	}
 	if c.HeaderDisplay != HeaderTwoRow && c.HeaderDisplay != HeaderOneRow {
 		notes = append(notes, fmt.Sprintf("表头显示模式 %q 无效，已重置为 twoRow", c.HeaderDisplay))

@@ -130,7 +130,7 @@ export function HistoryView({ datasetId, dataset = 'merged', onClose, onExported
             </Button>
             {dataset === 'merged' ? (
               <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doBundle()}>
-                导出三表（带颜色） (.xlsx)
+                导出整合表（含 Month End） (.xlsx)
               </Button>
             ) : (
               <Button icon={<FileDown size={14} />} disabled={exporting} onClick={() => void doExport('template')}>

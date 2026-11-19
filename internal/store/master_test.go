@@ -88,6 +88,34 @@ func TestReplaceMasterDataOverviewAndPages(t *testing.T) {
 	}
 }
 
+func TestMasterLookupResolvesItemToPrice(t *testing.T) {
+	st := openMasterStore(t)
+	if err := st.ReplaceMasterData(testMasterWorkbook()); err != nil {
+		t.Fatal(err)
+	}
+	cost := 12.5
+	if err := st.ReplacePriceData(&master.PriceWorkbook{Prices: []master.PriceEntry{{Material: "S1", StandardCost: &cost}}}); err != nil {
+		t.Fatal(err)
+	}
+	lookup, err := st.MasterLookup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := lookup["I1"]
+	if !ok {
+		t.Fatal("I1 missing")
+	}
+	if got.BaseCode != "B1" || got.SapCode != "S1" || got.Category != "Cat A" || got.StandardCost == nil || *got.StandardCost != cost {
+		t.Fatalf("lookup = %+v", got)
+	}
+	if got, ok := lookup["I2"]; !ok || got.StandardCost != nil {
+		t.Fatalf("I2 lookup = %+v, ok=%v", got, ok)
+	}
+	if got, ok := lookup["I3"]; !ok || got.BaseCode != "MISSING" || got.SapCode != "" || got.Category != "" {
+		t.Fatalf("orphan lookup = %+v, ok=%v", got, ok)
+	}
+}
+
 func TestSaveAndDeleteMasterRows(t *testing.T) {
 	st := openMasterStore(t)
 	if err := st.ReplaceMasterData(testMasterWorkbook()); err != nil {
