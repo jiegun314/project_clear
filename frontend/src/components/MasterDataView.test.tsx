@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MasterDataView } from './MasterDataView';
 import { api } from '../services/api';
-import type { MasterImportResult, MasterOverview, MasterPage, MasterQuery } from '../types';
+import type { MasterImportResult, MasterOverview, MasterPage, MasterQuery, PriceImportResult } from '../types';
 
 vi.mock('../services/api', () => ({
   api: {
@@ -11,6 +11,7 @@ vi.mock('../services/api', () => ({
     saveMasterRow: vi.fn(),
     deleteMasterRow: vi.fn(),
     importMasterWorkbook: vi.fn(),
+    importPriceWorkbook: vi.fn(),
   },
 }));
 
@@ -22,8 +23,11 @@ const overview: MasterOverview = {
   uncategorized: 1504,
   orphanCount: 161,
   unusedCategories: 38,
+  priceCount: 94502,
+  priceMissing: 1024,
   categories: ['Cat A', 'Cat B'],
   lastImportAt: '2026-11-18 22:00:00',
+  lastPriceImportAt: '2026-11-19 21:30:00',
 };
 
 const itemPage: MasterPage = {
@@ -66,6 +70,17 @@ const basePage: MasterPage = {
   pageSize: 50,
 };
 
+const pricePage: MasterPage = {
+  rows: [
+    { table: 'price', key: '000.009', material: '000.009', standardCost: 107.36, updatedAt: '2026-11-19' },
+    { table: 'price', key: '000.010', material: '000.010', standardCost: null, updatedAt: '2026-11-19' },
+    { table: 'price', key: '000.011', material: '000.011', standardCost: 0, updatedAt: '2026-11-19' },
+  ],
+  total: 3,
+  page: 1,
+  pageSize: 50,
+};
+
 const categoryPage: MasterPage = {
   rows: [
     { table: 'category', key: 'S-1', sapCode: 'S-1', category: 'Cat A', refCount: 3, unused: false },
@@ -79,6 +94,7 @@ const categoryPage: MasterPage = {
 function pageFor(q: MasterQuery): MasterPage {
   if (q.table === 'base') return basePage;
   if (q.table === 'category') return categoryPage;
+  if (q.table === 'price') return pricePage;
   return itemPage;
 }
 
@@ -90,6 +106,7 @@ describe('MasterDataView', () => {
     vi.mocked(api.saveMasterRow).mockResolvedValue();
     vi.mocked(api.deleteMasterRow).mockResolvedValue();
     vi.mocked(api.importMasterWorkbook).mockResolvedValue(null);
+    vi.mocked(api.importPriceWorkbook).mockResolvedValue(null);
   });
 
   it('shows the master counters and the item table', async () => {
@@ -121,12 +138,43 @@ describe('MasterDataView', () => {
     expect(screen.getByText('未使用')).toBeTruthy();
   });
 
-  it('keeps the price tab as a reserved placeholder', async () => {
+  it('shows the real price table and price counters', async () => {
     render(<MasterDataView onClose={() => undefined} />);
     await screen.findAllByText('I-1');
-    fireEvent.click(screen.getAllByRole('tab', { name: '产品价格（预留）' })[0]);
-    expect(await screen.findByText('产品价格工作簿将在后续版本加入')).toBeTruthy();
-    expect(api.queryMasterData).toHaveBeenCalledWith(expect.objectContaining({ table: 'item' }));
+    fireEvent.click(screen.getAllByRole('tab', { name: '产品价格' })[0]);
+    expect(await screen.findByText('107.36')).toBeTruthy();
+    expect(screen.getAllByText('未定价').length).toBeGreaterThan(0);
+    expect(screen.getByText('94,502')).toBeTruthy();
+    expect(api.queryMasterData).toHaveBeenCalledWith(
+      expect.objectContaining({ table: 'price', page: 1, pageSize: 50 }),
+    );
+  });
+
+  it('imports a price workbook after confirmation and reports the result', async () => {
+    const result: PriceImportResult = {
+      path: '/tmp/price.xlsx',
+      name: 'price.xlsx',
+      prices: 94502,
+      duplicateRows: 23,
+      missingCosts: 1024,
+      skippedRows: 0,
+      warnings: [],
+      importedAt: '2026-11-19 21:40:00',
+    };
+    vi.mocked(api.importPriceWorkbook).mockResolvedValue(result);
+    render(<MasterDataView onClose={() => undefined} />);
+    await screen.findAllByText('I-1');
+    fireEvent.click(screen.getAllByRole('tab', { name: '产品价格' })[0]);
+    await screen.findByText('000.009');
+
+    fireEvent.click(screen.getByRole('button', { name: '导入价格工作簿' }));
+    expect(screen.getByText('导入价格工作簿并覆盖价格主数据？')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '选择工作簿' }));
+
+    expect(await screen.findByText('产品价格导入完成')).toBeTruthy();
+    expect(api.importPriceWorkbook).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('price.xlsx', { exact: false })).toBeTruthy();
+    expect(screen.getAllByText('1,024').length).toBeGreaterThan(0);
   });
 
   it('imports a workbook after confirmation and reports the result', async () => {

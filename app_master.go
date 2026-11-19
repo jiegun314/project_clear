@@ -63,3 +63,24 @@ func (a *App) ImportMasterWorkbook() (out *master.ImportResult, err error) {
 	a.rememberDir(filepath.Dir(paths[0]))
 	return a.svc.ImportMasterWorkbook(paths[0])
 }
+
+// ImportPriceWorkbook asks for the product-price workbook and replaces the
+// current local prices. Code mappings are not touched.
+func (a *App) ImportPriceWorkbook() (out *master.PriceImportResult, err error) {
+	defer a.recoverFault("ImportPriceWorkbook", &err)
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	paths, err := selectOneFile("选择产品价格主数据工作簿", a.lastDir(), []string{"xlsx", "xlsm"})
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	if len(paths) > 1 {
+		return nil, fmt.Errorf("请选择一个价格工作簿")
+	}
+	a.rememberDir(filepath.Dir(paths[0]))
+	return a.svc.ImportPriceWorkbook(paths[0])
+}

@@ -93,7 +93,14 @@ cp "$EXE" "$PKG/"
   Windows 10 / 11，需要 Microsoft Edge WebView2 运行时（系统一般已预装；
   如提示缺少，请安装 Microsoft Edge WebView2 Runtime Evergreen 版）。
 
-本版更新（v2.4.0）
+本版更新（v2.5.0）
+  1. 「产品价格」页正式上线，维护独立的 Material → Standard Cost 价格主数据。
+  2. 支持导入 MATERIAL_MASTER 工作簿，只读取 Material 与 Standard_Cost 两列。
+  3. Material 按文本保留前导零；Standard_Cost 按数字读入，空白保存为“未定价”。
+  4. 重复 Material 保留最后一行；价格导入只覆盖价格表，不影响代码映射和整合数据。
+  5. 数据库升级到 v7，新增 master_price 表；历史周与已有映射不回溯改写。
+
+包含 v2.4.0 的改动
   1. 新增「主数据」页面，维护 Item → Base、Base → SAP、SAP → 分类三张本地映射表。
   2. 支持用「用于Code匹配.xlsx」工作簿覆盖导入三张表，只读取映射列，忽略公式列。
   3. 支持搜索、分页、逐行新增/编辑/删除；未分类、孤儿 Base、未使用分类只提示，不阻断。

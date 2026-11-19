@@ -99,6 +99,60 @@ func TestReadWorkbookRejectsMissingSheets(t *testing.T) {
 	}
 }
 
+func TestReadPriceWorkbookReadsLastDuplicateAndKeepsBlankCost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "price.xlsx")
+	f := excelize.NewFile()
+	t.Cleanup(func() { _ = f.Close() })
+	setRow(t, f, "Sheet1", 1, "MARC_MATNR", "Report")
+	setRow(t, f, "Sheet1", 2, "Material", "Description", "Standard_Cost")
+	setRow(t, f, "Sheet1", 3, "000.009", "HOLDER", "107.36")
+	setRow(t, f, "Sheet1", 4, "000.010", "NO PRICE", "")
+	setRow(t, f, "Sheet1", 5, "000.011", "COMMA", "1,234.50")
+	setRow(t, f, "Sheet1", 6, "000.009", "UPDATED", "108.00")
+	setRow(t, f, "Sheet1", 7, "BAD", "NOT A NUMBER", "n/a")
+	setRow(t, f, "Sheet1", 8, "", "NO MATERIAL", "10.00")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := ReadPriceWorkbook(path)
+	if err != nil {
+		t.Fatalf("ReadPriceWorkbook: %v", err)
+	}
+	if len(w.Prices) != 3 {
+		t.Fatalf("prices = %+v, want 3", w.Prices)
+	}
+	if w.DuplicateRows != 1 || w.MissingCosts != 1 || w.SkippedRows != 2 {
+		t.Fatalf("duplicates=%d missing=%d skipped=%d", w.DuplicateRows, w.MissingCosts, w.SkippedRows)
+	}
+	if len(w.Warnings) != 3 {
+		t.Fatalf("warnings = %v, want 3", w.Warnings)
+	}
+	first := w.Prices[0]
+	if first.Material != "000.009" || first.StandardCost == nil || *first.StandardCost != 108 {
+		t.Fatalf("first price = %+v", first)
+	}
+	if w.Prices[1].Material != "000.010" || w.Prices[1].StandardCost != nil {
+		t.Fatalf("blank price = %+v", w.Prices[1])
+	}
+	if w.Prices[2].StandardCost == nil || *w.Prices[2].StandardCost != 1234.5 {
+		t.Fatalf("comma price = %+v", w.Prices[2])
+	}
+}
+
+func TestReadPriceWorkbookRejectsMissingHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad-price.xlsx")
+	f := excelize.NewFile()
+	t.Cleanup(func() { _ = f.Close() })
+	setRow(t, f, "Sheet1", 1, "Something", "Else")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadPriceWorkbook(path); err == nil {
+		t.Fatal("expected a missing-header error")
+	}
+}
+
 func TestSortCategories(t *testing.T) {
 	got := SortCategories([]string{"Zeta", "", "alpha", "ALPHA", "Beta "})
 	want := []string{"alpha", "Beta", "Zeta"}

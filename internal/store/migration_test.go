@@ -133,8 +133,8 @@ func TestMigrationFromV4CreatesDatasetsAndIntegration(t *testing.T) {
 	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 {
-		t.Fatalf("schema version = %d, want 6", version)
+	if version != 7 {
+		t.Fatalf("schema version = %d, want 7", version)
 	}
 	st.Close()
 

@@ -1,5 +1,5 @@
 export namespace config {
-	
+
 	export class Config {
 	    configVersion: number;
 	    readColumns: number;
@@ -10,11 +10,11 @@ export namespace config {
 	    headerDisplay: string;
 	    exportMode: string;
 	    exportDir: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.configVersion = source["configVersion"];
@@ -32,18 +32,18 @@ export namespace config {
 }
 
 export namespace logging {
-	
+
 	export class Entry {
 	    seq: number;
 	    time: string;
 	    level: string;
 	    source: string;
 	    message: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Entry(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.seq = source["seq"];
@@ -57,7 +57,7 @@ export namespace logging {
 }
 
 export namespace master {
-	
+
 	export class ImportResult {
 	    path: string;
 	    name: string;
@@ -69,11 +69,11 @@ export namespace master {
 	    uncategorized: number;
 	    warnings: string[];
 	    importedAt: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ImportResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -96,11 +96,13 @@ export namespace master {
 	    manuCode: string;
 	    sapCode: string;
 	    category: string;
-	
+	    material: string;
+	    standardCost?: number;
+
 	    static createFrom(source: any = {}) {
 	        return new Input(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.table = source["table"];
@@ -110,6 +112,8 @@ export namespace master {
 	        this.manuCode = source["manuCode"];
 	        this.sapCode = source["sapCode"];
 	        this.category = source["category"];
+	        this.material = source["material"];
+	        this.standardCost = source["standardCost"];
 	    }
 	}
 	export class Overview {
@@ -120,13 +124,16 @@ export namespace master {
 	    uncategorized: number;
 	    orphanCount: number;
 	    unusedCategories: number;
+	    priceCount: number;
+	    priceMissing: number;
 	    categories: string[];
 	    lastImportAt: string;
-	
+	    lastPriceImportAt: string;
+
 	    static createFrom(source: any = {}) {
 	        return new Overview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.itemCount = source["itemCount"];
@@ -136,8 +143,11 @@ export namespace master {
 	        this.uncategorized = source["uncategorized"];
 	        this.orphanCount = source["orphanCount"];
 	        this.unusedCategories = source["unusedCategories"];
+	        this.priceCount = source["priceCount"];
+	        this.priceMissing = source["priceMissing"];
 	        this.categories = source["categories"];
 	        this.lastImportAt = source["lastImportAt"];
+	        this.lastPriceImportAt = source["lastPriceImportAt"];
 	    }
 	}
 	export class Row {
@@ -148,16 +158,18 @@ export namespace master {
 	    manuCode?: string;
 	    sapCode?: string;
 	    category?: string;
+	    material?: string;
+	    standardCost?: number;
 	    uncategorized?: boolean;
 	    orphan?: boolean;
 	    unused?: boolean;
 	    refCount?: number;
 	    updatedAt?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Row(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.table = source["table"];
@@ -167,6 +179,8 @@ export namespace master {
 	        this.manuCode = source["manuCode"];
 	        this.sapCode = source["sapCode"];
 	        this.category = source["category"];
+	        this.material = source["material"];
+	        this.standardCost = source["standardCost"];
 	        this.uncategorized = source["uncategorized"];
 	        this.orphan = source["orphan"];
 	        this.unused = source["unused"];
@@ -179,11 +193,11 @@ export namespace master {
 	    total: number;
 	    page: number;
 	    pageSize: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Page(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.rows = this.convertValues(source["rows"], Row);
@@ -191,7 +205,7 @@ export namespace master {
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -210,17 +224,43 @@ export namespace master {
 		    return a;
 		}
 	}
+	export class PriceImportResult {
+	    path: string;
+	    name: string;
+	    prices: number;
+	    duplicateRows: number;
+	    missingCosts: number;
+	    skippedRows: number;
+	    warnings: string[];
+	    importedAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PriceImportResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.prices = source["prices"];
+	        this.duplicateRows = source["duplicateRows"];
+	        this.missingCosts = source["missingCosts"];
+	        this.skippedRows = source["skippedRows"];
+	        this.warnings = source["warnings"];
+	        this.importedAt = source["importedAt"];
+	    }
+	}
 	export class Query {
 	    table: string;
 	    page: number;
 	    pageSize: number;
 	    search: string;
 	    filter: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Query(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.table = source["table"];
@@ -234,18 +274,18 @@ export namespace master {
 }
 
 export namespace mps {
-	
+
 	export class Week {
 	    code: string;
 	    year: number;
 	    weekNo: number;
 	    // Go type: time
 	    start: any;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Week(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -253,7 +293,7 @@ export namespace mps {
 	        this.weekNo = source["weekNo"];
 	        this.start = this.convertValues(source["start"], null);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -276,7 +316,7 @@ export namespace mps {
 }
 
 export namespace service {
-	
+
 	export class ArchiveEntry {
 	    weekCode: string;
 	    weekStart: string;
@@ -289,11 +329,11 @@ export namespace service {
 	    fileCount: number;
 	    committedAt: string;
 	    expired: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ArchiveEntry(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.weekCode = source["weekCode"];
@@ -318,11 +358,11 @@ export namespace service {
 	    rowsKept: number;
 	    weekCode: string;
 	    err?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -346,11 +386,11 @@ export namespace service {
 	    err?: string;
 	    dataset: string;
 	    version: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileWithDataset(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -378,11 +418,11 @@ export namespace service {
 	    importedAt: string;
 	    expired: boolean;
 	    integrationAt?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FinishResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.datasetId = source["datasetId"];
@@ -398,7 +438,7 @@ export namespace service {
 	        this.expired = source["expired"];
 	        this.integrationAt = source["integrationAt"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -438,11 +478,11 @@ export namespace service {
 	    expired: boolean;
 	    rowCount: number;
 	    fileCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ImportResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.action = source["action"];
@@ -466,7 +506,7 @@ export namespace service {
 	        this.rowCount = source["rowCount"];
 	        this.fileCount = source["fileCount"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -489,16 +529,16 @@ export namespace service {
 }
 
 export namespace store {
-	
+
 	export class CellMeta {
 	    color?: string;
 	    comment?: string;
 	    author?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CellMeta(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.color = source["color"];
@@ -513,11 +553,11 @@ export namespace store {
 	    weekMeta: CellMeta[];
 	    fileName: string;
 	    srcRow: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GridRow(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.seq = source["seq"];
@@ -527,7 +567,7 @@ export namespace store {
 	        this.fileName = source["fileName"];
 	        this.srcRow = source["srcRow"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -551,11 +591,11 @@ export namespace store {
 	    total: number;
 	    page: number;
 	    pageSize: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GridResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.rows = this.convertValues(source["rows"], GridRow);
@@ -563,7 +603,7 @@ export namespace store {
 	        this.page = source["page"];
 	        this.pageSize = source["pageSize"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -586,7 +626,7 @@ export namespace store {
 }
 
 export namespace view {
-	
+
 	export class AppInfo {
 	    name: string;
 	    fullName: string;
@@ -596,11 +636,11 @@ export namespace view {
 	    database: string;
 	    goVersion: string;
 	    platform: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AppInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -632,11 +672,11 @@ export namespace view {
 	    requestedWeeks: number;
 	    mergedWeeks: number;
 	    warnings: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CommitResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.weekCode = source["weekCode"];
@@ -662,17 +702,17 @@ export namespace view {
 	export class ConfigView {
 	    config: config.Config;
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ConfigView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.config = this.convertValues(source["config"], config.Config);
 	        this.path = source["path"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -694,11 +734,11 @@ export namespace view {
 	export class DiscardWeekResult {
 	    weekCode: string;
 	    datasets: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DiscardWeekResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.weekCode = source["weekCode"];
@@ -721,11 +761,11 @@ export namespace view {
 	    durationMs: number;
 	    sheets: number;
 	    expired: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExportResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.destPath = source["destPath"];
@@ -752,11 +792,11 @@ export namespace view {
 	    rowCount: number;
 	    failedCount: number;
 	    note?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FilesView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.files = this.convertValues(source["files"], service.FileWithDataset);
@@ -766,7 +806,7 @@ export namespace view {
 	        this.failedCount = source["failedCount"];
 	        this.note = source["note"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -795,11 +835,11 @@ export namespace view {
 	    weeks: mps.Week[];
 	    total: number;
 	    expired: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GridHeader(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.datasetId = source["datasetId"];
@@ -812,7 +852,7 @@ export namespace view {
 	        this.total = source["total"];
 	        this.expired = source["expired"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -839,11 +879,11 @@ export namespace view {
 	    sortField: string;
 	    sortDesc: boolean;
 	    filters: Record<string, string>;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new GridQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.datasetId = source["datasetId"];
@@ -898,11 +938,11 @@ export namespace view {
 	    exportMode: string;
 	    database: string;
 	    lastAction: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hasDraft = source["hasDraft"];

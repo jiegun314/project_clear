@@ -9,6 +9,7 @@ package master
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -19,12 +20,13 @@ const (
 	TableItem     = "item"
 	TableBase     = "base"
 	TableCategory = "category"
+	TablePrice    = "price"
 )
 
 // ValidTable reports whether table is one of the master-data tables.
 func ValidTable(table string) bool {
 	switch table {
-	case TableItem, TableBase, TableCategory:
+	case TableItem, TableBase, TableCategory, TablePrice:
 		return true
 	}
 	return false
@@ -52,6 +54,30 @@ type CategoryEntry struct {
 	SourceRow int
 }
 
+// PriceEntry is one Material -> Standard Cost row. A nil StandardCost means the
+// source row had no price; it is kept so the missing price is visible instead of
+// silently disappearing.
+type PriceEntry struct {
+	Material     string
+	StandardCost *float64
+	SourceRow    int
+}
+
+// PriceWorkbook is the validated, de-duplicated content of one price file.
+type PriceWorkbook struct {
+	Path   string
+	Name   string
+	Prices []PriceEntry
+
+	// DuplicateRows counts repeated Material keys that were collapsed.
+	DuplicateRows int
+	// MissingCosts counts rows whose Standard_Cost cell was blank.
+	MissingCosts int
+	// SkippedRows counts rows rejected for a non-numeric price or a blank key.
+	SkippedRows int
+	Warnings    []string
+}
+
 // Workbook is the validated, de-duplicated content of one master-data file.
 type Workbook struct {
 	Path       string
@@ -69,18 +95,20 @@ type Workbook struct {
 
 // Row is one row returned to the UI. Only the fields for its table are set.
 type Row struct {
-	Table         string `json:"table"`
-	Key           string `json:"key"`
-	ItemCode      string `json:"itemCode,omitempty"`
-	BaseCode      string `json:"baseCode,omitempty"`
-	ManuCode      string `json:"manuCode,omitempty"`
-	SapCode       string `json:"sapCode,omitempty"`
-	Category      string `json:"category,omitempty"`
-	Uncategorized bool   `json:"uncategorized,omitempty"`
-	Orphan        bool   `json:"orphan,omitempty"`
-	Unused        bool   `json:"unused,omitempty"`
-	RefCount      int    `json:"refCount,omitempty"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
+	Table         string   `json:"table"`
+	Key           string   `json:"key"`
+	ItemCode      string   `json:"itemCode,omitempty"`
+	BaseCode      string   `json:"baseCode,omitempty"`
+	ManuCode      string   `json:"manuCode,omitempty"`
+	SapCode       string   `json:"sapCode,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	Material      string   `json:"material,omitempty"`
+	StandardCost  *float64 `json:"standardCost,omitempty"`
+	Uncategorized bool     `json:"uncategorized,omitempty"`
+	Orphan        bool     `json:"orphan,omitempty"`
+	Unused        bool     `json:"unused,omitempty"`
+	RefCount      int      `json:"refCount,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
 }
 
 // Query is the server-side page request for one master table.
@@ -106,26 +134,31 @@ type Page struct {
 // empty means create. Editing a primary key is allowed for Item/Base/Category,
 // but the store refuses to orphan referencing rows.
 type Input struct {
-	Table       string `json:"table"`
-	OriginalKey string `json:"originalKey"`
-	ItemCode    string `json:"itemCode"`
-	BaseCode    string `json:"baseCode"`
-	ManuCode    string `json:"manuCode"`
-	SapCode     string `json:"sapCode"`
-	Category    string `json:"category"`
+	Table        string   `json:"table"`
+	OriginalKey  string   `json:"originalKey"`
+	ItemCode     string   `json:"itemCode"`
+	BaseCode     string   `json:"baseCode"`
+	ManuCode     string   `json:"manuCode"`
+	SapCode      string   `json:"sapCode"`
+	Category     string   `json:"category"`
+	Material     string   `json:"material"`
+	StandardCost *float64 `json:"standardCost"`
 }
 
 // Overview holds the counters and category choices shown above the table.
 type Overview struct {
-	ItemCount        int      `json:"itemCount"`
-	BaseCount        int      `json:"baseCount"`
-	SapCount         int      `json:"sapCount"`
-	CategoryCount    int      `json:"categoryCount"`
-	Uncategorized    int      `json:"uncategorized"`
-	OrphanCount      int      `json:"orphanCount"`
-	UnusedCategories int      `json:"unusedCategories"`
-	Categories       []string `json:"categories"`
-	LastImportAt     string   `json:"lastImportAt"`
+	ItemCount         int      `json:"itemCount"`
+	BaseCount         int      `json:"baseCount"`
+	SapCount          int      `json:"sapCount"`
+	CategoryCount     int      `json:"categoryCount"`
+	Uncategorized     int      `json:"uncategorized"`
+	OrphanCount       int      `json:"orphanCount"`
+	UnusedCategories  int      `json:"unusedCategories"`
+	PriceCount        int      `json:"priceCount"`
+	PriceMissing      int      `json:"priceMissing"`
+	Categories        []string `json:"categories"`
+	LastImportAt      string   `json:"lastImportAt"`
+	LastPriceImportAt string   `json:"lastPriceImportAt"`
 }
 
 // ImportResult reports one workbook import.
@@ -142,6 +175,18 @@ type ImportResult struct {
 	ImportedAt    string   `json:"importedAt"`
 }
 
+// PriceImportResult reports one price-workbook import.
+type PriceImportResult struct {
+	Path          string   `json:"path"`
+	Name          string   `json:"name"`
+	Prices        int      `json:"prices"`
+	DuplicateRows int      `json:"duplicateRows"`
+	MissingCosts  int      `json:"missingCosts"`
+	SkippedRows   int      `json:"skippedRows"`
+	Warnings      []string `json:"warnings"`
+	ImportedAt    string   `json:"importedAt"`
+}
+
 // LookupResult is the read-only code-chain lookup.
 type LookupResult struct {
 	ItemCode string `json:"itemCode"`
@@ -150,6 +195,120 @@ type LookupResult struct {
 	SapCode  string `json:"sapCode"`
 	Category string `json:"category"`
 	Rows     []Row  `json:"rows"`
+}
+
+// ReadPriceWorkbook opens path and reads Material and Standard_Cost. The header
+// row is found in the first 20 rows, so the source report's first technical row
+// and a normalized two-column workbook are both accepted. Only those two columns
+// are read; every other column (description, hierarchy, plant, ...) is ignored.
+func ReadPriceWorkbook(path string) (*PriceWorkbook, error) {
+	f, err := excelize.OpenFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("打开价格工作簿失败: %w", err)
+	}
+	defer f.Close()
+
+	for _, sheet := range f.GetSheetList() {
+		found, err := readPriceSheet(f, sheet)
+		if err != nil {
+			return nil, fmt.Errorf("读取价格工作表 %s 失败: %w", sheet, err)
+		}
+		if found != nil {
+			found.Path = path
+			found.Name = fileBase(path)
+			return found, nil
+		}
+	}
+	return nil, fmt.Errorf("找不到包含 Material / Standard_Cost 的工作表")
+}
+
+func readPriceSheet(f *excelize.File, sheet string) (*PriceWorkbook, error) {
+	rows, err := f.Rows(sheet)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := &PriceWorkbook{Prices: []PriceEntry{}}
+	materialCol, costCol := -1, -1
+	headerRow := 0
+	rowNo := 0
+	index := map[string]int{}
+	for rows.Next() {
+		rowNo++
+		cols, err := rows.Columns()
+		if err != nil {
+			return nil, err
+		}
+		if materialCol < 0 {
+			if rowNo > 20 {
+				break
+			}
+			for c, value := range cols {
+				switch headerKey(value) {
+				case "material":
+					materialCol = c
+				case "standardcost":
+					costCol = c
+				}
+			}
+			if materialCol >= 0 && costCol >= 0 {
+				headerRow = rowNo
+			}
+			continue
+		}
+		if rowNo <= headerRow {
+			continue
+		}
+		material := cell(cols, materialCol)
+		rawCost := cell(cols, costCol)
+		if material == "" && rawCost == "" {
+			continue
+		}
+		if material == "" {
+			out.SkippedRows++
+			out.Warnings = append(out.Warnings,
+				fmt.Sprintf("价格第 %d 行缺少 Material，已跳过", rowNo))
+			continue
+		}
+		var cost *float64
+		if rawCost != "" {
+			numeric := strings.ReplaceAll(rawCost, ",", "")
+			value, err := strconv.ParseFloat(numeric, 64)
+			if err != nil {
+				out.SkippedRows++
+				out.Warnings = append(out.Warnings,
+					fmt.Sprintf("Material %s 的 Standard_Cost %q 不是数字，已跳过（第 %d 行）", material, rawCost, rowNo))
+				continue
+			}
+			cost = &value
+		} else {
+			out.MissingCosts++
+		}
+		entry := PriceEntry{Material: material, StandardCost: cost, SourceRow: rowNo}
+		if old, ok := index[material]; ok {
+			out.DuplicateRows++
+			if !samePrice(out.Prices[old], entry) {
+				out.Warnings = append(out.Warnings,
+					fmt.Sprintf("Material %s 出现多次，保留最后一行（第 %d 行）", material, rowNo))
+			}
+			out.Prices[old] = entry
+			continue
+		}
+		index[material] = len(out.Prices)
+		out.Prices = append(out.Prices, entry)
+	}
+	if materialCol < 0 {
+		return nil, nil
+	}
+	return out, rows.Error()
+}
+
+func samePrice(a, b PriceEntry) bool {
+	if a.StandardCost == nil || b.StandardCost == nil {
+		return a.StandardCost == nil && b.StandardCost == nil
+	}
+	return *a.StandardCost == *b.StandardCost
 }
 
 // ReadWorkbook opens path and reads the three mapping sheets. It is strict about

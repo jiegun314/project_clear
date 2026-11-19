@@ -8,6 +8,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
@@ -35,9 +36,10 @@ import type {
   MasterOverview,
   MasterRow,
   MasterTable,
+  PriceImportResult,
 } from '../types';
 
-type TabKey = MasterTable | 'price';
+type TabKey = MasterTable;
 
 interface Props {
   onClose: () => void;
@@ -49,6 +51,8 @@ interface EditorValues {
   manuCode?: string;
   sapCode?: string;
   category?: string;
+  material?: string;
+  standardCost?: number | null;
 }
 
 interface EditorState {
@@ -60,6 +64,7 @@ const TABLE_LABEL: Record<MasterTable, string> = {
   item: 'Item → Base',
   base: 'Base → SAP',
   category: 'SAP → Category',
+  price: '产品价格',
 };
 
 const PAGE_SIZE = 50;
@@ -76,6 +81,15 @@ function isFormError(err: unknown): boolean {
 function CategoryTag({ category }: { category?: string }) {
   if (!category) return <Tag color="orange">未分类</Tag>;
   return <Tag>{category}</Tag>;
+}
+
+function CostTag({ cost }: { cost?: number | null }) {
+  if (cost === null || cost === undefined) return <Tag color="orange">未定价</Tag>;
+  return (
+    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+      {cost.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+    </span>
+  );
 }
 
 /**
@@ -101,8 +115,9 @@ export function MasterDataView({ onClose }: Props) {
   const [confirmImport, setConfirmImport] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<MasterImportResult | null>(null);
+  const [priceImportResult, setPriceImportResult] = useState<PriceImportResult | null>(null);
   const [form] = Form.useForm<EditorValues>();
-  const activeLabel = tab === 'price' ? '产品价格' : TABLE_LABEL[tab];
+  const activeLabel = TABLE_LABEL[tab];
 
   const loadOverview = useCallback(async () => {
     try {
@@ -113,7 +128,6 @@ export function MasterDataView({ onClose }: Props) {
   }, []);
 
   const loadRows = useCallback(async () => {
-    if (tab === 'price') return;
     setLoading(true);
     try {
       const result = await api.queryMasterData({
@@ -166,12 +180,14 @@ export function MasterDataView({ onClose }: Props) {
       manuCode: row.manuCode,
       sapCode: row.sapCode,
       category: row.category,
+      material: row.material,
+      standardCost: row.standardCost ?? null,
     });
     setEditor({ mode: 'edit', row });
   }, [form]);
 
   const save = async () => {
-    if (!editor || tab === 'price') return;
+    if (!editor) return;
     let values: EditorValues;
     try {
       values = await form.validateFields();
@@ -187,6 +203,8 @@ export function MasterDataView({ onClose }: Props) {
       manuCode: values.manuCode?.trim() ?? '',
       sapCode: values.sapCode?.trim() ?? '',
       category: values.category?.trim() ?? '',
+      material: values.material?.trim() ?? '',
+      standardCost: typeof values.standardCost === 'number' ? values.standardCost : null,
     };
     setSaving(true);
     try {
@@ -224,9 +242,15 @@ export function MasterDataView({ onClose }: Props) {
     setConfirmImport(false);
     setImporting(true);
     try {
-      const result = await api.importMasterWorkbook();
-      if (!result) return;
-      setImportResult(result);
+      if (tab === 'price') {
+        const result = await api.importPriceWorkbook();
+        if (!result) return;
+        setPriceImportResult(result);
+      } else {
+        const result = await api.importMasterWorkbook();
+        if (!result) return;
+        setImportResult(result);
+      }
       setPage(1);
       await refresh();
     } catch (err) {
@@ -244,8 +268,8 @@ export function MasterDataView({ onClose }: Props) {
         return [{ value: 'all', label: '全部' }, { value: 'uncategorized', label: '仅未分类' }];
       case 'category':
         return [{ value: 'all', label: '全部' }, { value: 'unused', label: '仅未使用' }];
-      default:
-        return [{ value: 'all', label: '全部' }];
+      case 'price':
+        return [{ value: 'all', label: '全部' }, { value: 'unpriced', label: '仅未定价' }];
     }
   }, [tab]);
 
@@ -295,6 +319,20 @@ export function MasterDataView({ onClose }: Props) {
         ops,
       ];
     }
+    if (tab === 'price') {
+      return [
+        { title: 'Material', dataIndex: 'material', width: 260, render: (v: string) => <strong>{v}</strong> },
+        { title: 'Standard Cost', dataIndex: 'standardCost', width: 180, align: 'right', render: (v?: number | null) => <CostTag cost={v} /> },
+        {
+          title: '状态',
+          dataIndex: 'standardCost',
+          width: 120,
+          render: (v?: number | null) => (v == null ? <Tag color="orange">未定价</Tag> : <Tag color="green">已定价</Tag>),
+        },
+        updated,
+        ops,
+      ];
+    }
     if (tab === 'base') {
       return [
         { title: 'Base Code', dataIndex: 'baseCode', width: 220, render: (v: string) => <strong>{v}</strong> },
@@ -326,7 +364,7 @@ export function MasterDataView({ onClose }: Props) {
     ];
   }, [tab, actions]);
 
-  const stats = overview
+  const codeStats = overview
     ? [
         { label: 'Item', value: overview.itemCount, hint: 'Item → Base 行数' },
         { label: 'Base', value: overview.baseCount, hint: 'Base → SAP 行数' },
@@ -337,6 +375,13 @@ export function MasterDataView({ onClose }: Props) {
         { label: '未使用分类', value: overview.unusedCategories, hint: '分类表中没有 Base 引用', tone: JNJ.warning },
       ]
     : [];
+  const priceStats = overview
+    ? [
+        { label: '价格条目', value: overview.priceCount, hint: 'Material → Standard Cost 行数' },
+        { label: '未定价', value: overview.priceMissing, hint: '标准成本为空，保留可见', tone: JNJ.warning },
+      ]
+    : [];
+  const stats = tab === 'price' ? priceStats : codeStats;
 
   const categoryOptions = (overview?.categories ?? []).map((c) => ({ value: c }));
 
@@ -361,7 +406,7 @@ export function MasterDataView({ onClose }: Props) {
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: JNJ.ink }}>主数据</span>
           <span style={{ fontSize: 12, color: JNJ.textMuted }}>
-            代码匹配与产品分类 · 本机维护，历史周不回溯更新
+            代码匹配、产品分类与产品价格 · 本机维护，历史周不回溯更新
           </span>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
@@ -373,9 +418,9 @@ export function MasterDataView({ onClose }: Props) {
             icon={<Upload size={15} />}
             loading={importing}
             onClick={() => setConfirmImport(true)}
-            aria-label="导入匹配工作簿"
+            aria-label={tab === 'price' ? '导入价格工作簿' : '导入匹配工作簿'}
           >
-            导入匹配工作簿
+            {tab === 'price' ? '导入价格工作簿' : '导入匹配工作簿'}
           </Button>
         </div>
       </header>
@@ -418,26 +463,10 @@ export function MasterDataView({ onClose }: Props) {
                 { key: 'item', label: 'Item → Base' },
                 { key: 'base', label: 'Base → SAP' },
                 { key: 'category', label: 'SAP → Category' },
-                { key: 'price', label: '产品价格（预留）' },
+                { key: 'price', label: '产品价格' },
               ]}
             />
 
-            {tab === 'price' ? (
-              <div style={{ padding: '40px 20px 56px' }}>
-                <Empty
-                  image={<BookOpen size={40} color={JNJ.textMuted} />}
-                  description={
-                    <div style={{ color: JNJ.text, maxWidth: 560, margin: '0 auto', lineHeight: 1.8 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>产品价格工作簿将在后续版本加入</div>
-                      <div style={{ color: JNJ.textMuted, fontSize: 12 }}>
-                        价格通常还需要金额精度、币种、单位与生效日期，因此单独维护，不与代码匹配表混用。
-                        当前页面位置已保留，不影响 Item / Base / SAP 分类的维护与导入。
-                      </div>
-                    </div>
-                  }
-                />
-              </div>
-            ) : (
               <div style={{ padding: '0 14px 14px' }}>
                 {error && (
                   <Alert
@@ -463,7 +492,7 @@ export function MasterDataView({ onClose }: Props) {
                   <Input.Search
                     key={tab}
                     allowClear
-                    placeholder="搜索编码或分类"
+                    placeholder={tab === 'price' ? '搜索 Material' : '搜索编码或分类'}
                     defaultValue={search}
                     onSearch={(v) => {
                       setPage(1);
@@ -482,7 +511,7 @@ export function MasterDataView({ onClose }: Props) {
                     aria-label="筛选主数据"
                   />
                   <span style={{ color: JNJ.textMuted, fontSize: 12 }}>
-                    共 {total.toLocaleString()} 条 · 未分类是正常状态
+                    共 {total.toLocaleString()} 条 · {tab === 'price' ? '未定价保留可见' : '未分类是正常状态'}
                   </span>
                   <Button
                     type="primary"
@@ -508,15 +537,22 @@ export function MasterDataView({ onClose }: Props) {
                     showTotal: (n) => `共 ${n.toLocaleString()} 条`,
                     onChange: (p) => setPage(p),
                   }}
-                  locale={{ emptyText: <Empty description="没有匹配记录" /> }}
+                  locale={{ emptyText: <Empty description={tab === 'price' ? '没有价格记录' : '没有匹配记录'} /> }}
                 />
               </div>
-            )}
           </div>
 
           <Typography.Text style={{ display: 'block', marginTop: 10, color: JNJ.textMuted, fontSize: 12 }}>
-            这些映射只影响之后导入/整合的数据，不会改写历史周；未分类、孤儿 Base 与未使用分类都允许存在。
-            {overview?.lastImportAt ? ` · 上次导入 ${overview.lastImportAt}` : ' · 尚未导入匹配工作簿'}
+            {tab === 'price'
+              ? '价格只在本机维护，不改写历史周；未定价的 Material 会保留，便于后续补价。'
+              : '这些映射只影响之后导入/整合的数据，不会改写历史周；未分类、孤儿 Base 与未使用分类都允许存在。'}
+            {tab === 'price'
+              ? overview?.lastPriceImportAt
+                ? ` · 上次价格导入 ${overview.lastPriceImportAt}`
+                : ' · 尚未导入价格工作簿'
+              : overview?.lastImportAt
+                ? ` · 上次导入 ${overview.lastImportAt}`
+                : ' · 尚未导入匹配工作簿'}
           </Typography.Text>
         </div>
       </main>
@@ -595,24 +631,58 @@ export function MasterDataView({ onClose }: Props) {
               </Form.Item>
             </>
           )}
+          {tab === 'price' && (
+            <>
+              <Form.Item
+                label="Material"
+                name="material"
+                rules={[{ required: true, message: '请输入 Material' }]}
+              >
+                <Input disabled={editor?.mode === 'edit'} autoFocus />
+              </Form.Item>
+              <Form.Item
+                label="Standard Cost"
+                name="standardCost"
+                extra="留空表示未定价；未定价仍会保留，不会被删除。"
+              >
+                <InputNumber
+                  min={0}
+                  step={0.01}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  placeholder="例如 107.36"
+                />
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Drawer>
 
       <Modal
         open={confirmImport}
-        title="导入匹配工作簿并覆盖主数据？"
+        title={tab === 'price' ? '导入价格工作簿并覆盖价格主数据？' : '导入匹配工作簿并覆盖主数据？'}
         okText="选择工作簿"
         cancelText="取消"
         onOk={() => void runImport()}
         onCancel={() => setConfirmImport(false)}
         confirmLoading={importing}
       >
-        <div style={{ lineHeight: 1.9 }}>
-          <div>会一次性覆盖 Item → Base、Base → SAP、SAP → Category 三张表。</div>
-          <div style={{ color: JNJ.textMuted, fontSize: 12 }}>
-            工作簿中的 D–Q 分析/公式列不会导入；重复主键会去重。未分类、孤儿 Base 只提示，不会阻断。
+        {tab === 'price' ? (
+          <div style={{ lineHeight: 1.9 }}>
+            <div>会覆盖产品价格表；Item → Base、Base → SAP、SAP → Category 不受影响。</div>
+            <div style={{ color: JNJ.textMuted, fontSize: 12 }}>
+              只读取 Material 和 Standard_Cost 两列；Material 按文本保留前导零，标准成本按数字读入。
+              重复 Material 保留最后一行；Standard_Cost 为空时保留为“未定价”，不会删除。
+            </div>
           </div>
-        </div>
+        ) : (
+          <div style={{ lineHeight: 1.9 }}>
+            <div>会一次性覆盖 Item → Base、Base → SAP、SAP → Category 三张表。</div>
+            <div style={{ color: JNJ.textMuted, fontSize: 12 }}>
+              工作簿中的 D–Q 分析/公式列不会导入；重复主键会去重。未分类、孤儿 Base 只提示，不会阻断。
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal
@@ -650,6 +720,47 @@ export function MasterDataView({ onClose }: Props) {
                       <li key={`${i}-${w}`}>{w}</li>
                     ))}
                     {importResult.warnings.length > 12 && <li>… 其余请查看日志</li>}
+                  </ul>
+                }
+              />
+            )}
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={Boolean(priceImportResult)}
+        title="产品价格导入完成"
+        onCancel={() => setPriceImportResult(null)}
+        footer={
+          <Button type="primary" onClick={() => setPriceImportResult(null)}>
+            知道了
+          </Button>
+        }
+      >
+        {priceImportResult && (
+          <>
+            <Descriptions column={2} size="small" bordered>
+              <Descriptions.Item label="价格条目">{priceImportResult.prices.toLocaleString()}</Descriptions.Item>
+              <Descriptions.Item label="未定价">{priceImportResult.missingCosts.toLocaleString()}</Descriptions.Item>
+              <Descriptions.Item label="重复 Material">{priceImportResult.duplicateRows.toLocaleString()}</Descriptions.Item>
+              <Descriptions.Item label="跳过行">{priceImportResult.skippedRows.toLocaleString()}</Descriptions.Item>
+            </Descriptions>
+            <div style={{ marginTop: 10, color: JNJ.textMuted, fontSize: 12 }}>
+              来源：{priceImportResult.name} · {priceImportResult.importedAt || '刚刚'}
+            </div>
+            {priceImportResult.warnings.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginTop: 12 }}
+                title={`有 ${priceImportResult.warnings.length} 条数据提示`}
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
+                    {priceImportResult.warnings.slice(0, 12).map((w, i) => (
+                      <li key={`${i}-${w}`}>{w}</li>
+                    ))}
+                    {priceImportResult.warnings.length > 12 && <li>… 其余请查看日志</li>}
                   </ul>
                 }
               />

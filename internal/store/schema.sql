@@ -152,6 +152,14 @@ CREATE TABLE IF NOT EXISTS master_sap_category (
   updated_at TEXT NOT NULL
 );
 
+-- Product prices are a separate local master table. Unlike the code mappings,
+-- a missing price is allowed (NULL) so it remains visible as "not priced".
+CREATE TABLE IF NOT EXISTS master_price (
+  material      TEXT PRIMARY KEY,
+  standard_cost REAL,
+  updated_at    TEXT NOT NULL
+);
+
 -- One row per import or edit. before/after hold a JSON snapshot of the row (or
 -- the import counts), so an accidental overwrite can be explained later.
 CREATE TABLE IF NOT EXISTS master_audit (

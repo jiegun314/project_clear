@@ -42,8 +42,21 @@ func (s *Store) MasterOverview() (master.Overview, error) {
 		Scan(&out.UnusedCategories); err != nil {
 		return out, err
 	}
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(changed_at),'') FROM master_audit WHERE action='import'`).
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM master_price`).Scan(&out.PriceCount); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM master_price WHERE standard_cost IS NULL`).
+		Scan(&out.PriceMissing); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(changed_at),'') FROM master_audit
+		WHERE action='import' AND table_name<>?`, master.TablePrice).
 		Scan(&out.LastImportAt); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(changed_at),'') FROM master_audit
+		WHERE action='import' AND table_name=?`, master.TablePrice).
+		Scan(&out.LastPriceImportAt); err != nil {
 		return out, err
 	}
 	rows, err := s.db.Query(`SELECT DISTINCT category FROM master_sap_category WHERE category <> '' ORDER BY category`)
@@ -118,6 +131,16 @@ func (s *Store) MasterPage(q master.Query) (master.Page, error) {
 			r.Table, r.Key = q.Table, r.SapCode
 			r.Uncategorized = strings.TrimSpace(r.Category) == ""
 			r.Unused = r.RefCount == 0
+		case master.TablePrice:
+			var cost sql.NullFloat64
+			if err := rows.Scan(&r.Material, &cost, &r.UpdatedAt); err != nil {
+				return out, err
+			}
+			if cost.Valid {
+				v := cost.Float64
+				r.StandardCost = &v
+			}
+			r.Table, r.Key = q.Table, r.Material
 		}
 		out.Rows = append(out.Rows, r)
 	}
@@ -135,6 +158,8 @@ func masterSelect(table string) string {
 	case master.TableCategory:
 		return `c.sap_code, c.category, c.updated_at,
 			(SELECT COUNT(*) FROM master_base_code b WHERE b.sap_code=c.sap_code)`
+	case master.TablePrice:
+		return `m.material, m.standard_cost, m.updated_at`
 	}
 	return ""
 }
@@ -147,6 +172,8 @@ func masterOrder(table string) string {
 		return `b.base_code`
 	case master.TableCategory:
 		return `c.sap_code`
+	case master.TablePrice:
+		return `m.material`
 	}
 	return `1`
 }
@@ -184,6 +211,16 @@ func masterTableQuery(q master.Query) (from, where string, args []any, err error
 		}
 		if q.Filter == "unused" {
 			where += ` AND NOT EXISTS (SELECT 1 FROM master_base_code b WHERE b.sap_code=c.sap_code)`
+		}
+	case master.TablePrice:
+		from = `FROM master_price m`
+		where = ` WHERE 1=1`
+		if search != "" {
+			where += ` AND m.material LIKE ?`
+			args = append(args, like)
+		}
+		if q.Filter == "unpriced" {
+			where += ` AND m.standard_cost IS NULL`
 		}
 	default:
 		return "", "", nil, fmt.Errorf("未知的主数据表 %q", q.Table)
@@ -248,6 +285,45 @@ func (s *Store) ReplaceMasterData(w *master.Workbook) error {
 	})
 	if _, err := tx.Exec(`INSERT INTO master_audit(table_name,key_value,action,before_json,after_json,changed_at)
 		VALUES('all','', 'import','',?,?)`, string(after), now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ReplacePriceData replaces the product-price table in one transaction. The code
+// mapping tables are intentionally untouched.
+func (s *Store) ReplacePriceData(w *master.PriceWorkbook) error {
+	if w == nil {
+		return fmt.Errorf("没有可导入的价格数据")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := Now()
+	if _, err := tx.Exec(`DELETE FROM master_price`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO master_price(material,standard_cost,updated_at) VALUES(?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, p := range w.Prices {
+		var cost any
+		if p.StandardCost != nil {
+			cost = *p.StandardCost
+		}
+		if _, err := stmt.Exec(p.Material, cost, now); err != nil {
+			return fmt.Errorf("写入价格 %s 失败: %w", p.Material, err)
+		}
+	}
+	after, _ := json.Marshal(map[string]any{
+		"path": w.Name, "prices": len(w.Prices), "missingCosts": w.MissingCosts,
+	})
+	if _, err := tx.Exec(`INSERT INTO master_audit(table_name,key_value,action,before_json,after_json,changed_at)
+		VALUES(?, '', 'import','',?,?)`, master.TablePrice, string(after), now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -342,6 +418,26 @@ func (s *Store) SaveMasterRow(in master.Input) error {
 			return err
 		}
 		in.SapCode = sap
+	case master.TablePrice:
+		material := strings.TrimSpace(in.Material)
+		if material == "" {
+			return fmt.Errorf("Material 不能为空")
+		}
+		if orig != "" && orig != material {
+			if existsQ(tx, `SELECT 1 FROM master_price WHERE material=?`, material) {
+				return fmt.Errorf("Material %s 已存在", material)
+			}
+			if _, err := tx.Exec(`DELETE FROM master_price WHERE material=?`, orig); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`INSERT INTO master_price(material,standard_cost,updated_at) VALUES(?,?,?)
+			ON CONFLICT(material) DO UPDATE SET standard_cost=excluded.standard_cost, updated_at=excluded.updated_at`,
+			material, in.StandardCost, now)
+		if err != nil {
+			return err
+		}
+		in.Material = material
 	}
 	after, _ := json.Marshal(in)
 	action := "update"
@@ -349,7 +445,7 @@ func (s *Store) SaveMasterRow(in master.Input) error {
 		action = "create"
 	}
 	if _, err := tx.Exec(`INSERT INTO master_audit(table_name,key_value,action,before_json,after_json,changed_at)
-		VALUES(?,?,?,?,?,?)`, in.Table, strings.TrimSpace(in.ItemCode+in.BaseCode+in.SapCode), action, before, string(after), now); err != nil {
+		VALUES(?,?,?,?,?,?)`, in.Table, strings.TrimSpace(in.ItemCode+in.BaseCode+in.SapCode+in.Material), action, before, string(after), now); err != nil {
 		return err
 	}
 	if orig != "" && !beforeFound {
@@ -359,7 +455,7 @@ func (s *Store) SaveMasterRow(in master.Input) error {
 }
 
 func masterSnapshot(q sqlQueryer, table, key string) (string, bool, error) {
-	var data map[string]string
+	var data map[string]any
 	switch table {
 	case master.TableItem:
 		var item, base, at string
@@ -371,7 +467,7 @@ func masterSnapshot(q sqlQueryer, table, key string) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		data = map[string]string{"itemCode": item, "baseCode": base, "updatedAt": at}
+		data = map[string]any{"itemCode": item, "baseCode": base, "updatedAt": at}
 	case master.TableBase:
 		var base, manu, sap, at string
 		err := q.QueryRow(`SELECT base_code,manu_code,sap_code,updated_at FROM master_base_code WHERE base_code=?`, key).
@@ -382,7 +478,7 @@ func masterSnapshot(q sqlQueryer, table, key string) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		data = map[string]string{"baseCode": base, "manuCode": manu, "sapCode": sap, "updatedAt": at}
+		data = map[string]any{"baseCode": base, "manuCode": manu, "sapCode": sap, "updatedAt": at}
 	case master.TableCategory:
 		var sap, category, at string
 		err := q.QueryRow(`SELECT sap_code,category,updated_at FROM master_sap_category WHERE sap_code=?`, key).
@@ -393,7 +489,24 @@ func masterSnapshot(q sqlQueryer, table, key string) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		data = map[string]string{"sapCode": sap, "category": category, "updatedAt": at}
+		data = map[string]any{"sapCode": sap, "category": category, "updatedAt": at}
+	case master.TablePrice:
+		var material string
+		var cost sql.NullFloat64
+		var at string
+		err := q.QueryRow(`SELECT material,standard_cost,updated_at FROM master_price WHERE material=?`, key).
+			Scan(&material, &cost, &at)
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		var value any
+		if cost.Valid {
+			value = cost.Float64
+		}
+		data = map[string]any{"material": material, "standardCost": value, "updatedAt": at}
 	default:
 		return "", false, fmt.Errorf("未知的主数据表 %q", table)
 	}
@@ -448,6 +561,10 @@ func (s *Store) DeleteMasterRow(table, key string) error {
 			return fmt.Errorf("SAP Code %s 仍被 %d 个 Base 使用，不能删除", key, n)
 		}
 		if _, err := tx.Exec(`DELETE FROM master_sap_category WHERE sap_code=?`, key); err != nil {
+			return err
+		}
+	case master.TablePrice:
+		if _, err := tx.Exec(`DELETE FROM master_price WHERE material=?`, key); err != nil {
 			return err
 		}
 	}

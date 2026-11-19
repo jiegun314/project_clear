@@ -94,6 +94,10 @@ export function ImportMasterWorkbook() {
   return window['go']['main']['App']['ImportMasterWorkbook']();
 }
 
+export function ImportPriceWorkbook() {
+  return window['go']['main']['App']['ImportPriceWorkbook']();
+}
+
 export function QueryData(arg1) {
   return window['go']['main']['App']['QueryData'](arg1);
 }

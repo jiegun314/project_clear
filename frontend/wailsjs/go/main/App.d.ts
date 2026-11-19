@@ -53,6 +53,8 @@ export function ImportLocalMPS():Promise<service.ImportResult>;
 
 export function ImportMasterWorkbook():Promise<master.ImportResult>;
 
+export function ImportPriceWorkbook():Promise<master.PriceImportResult>;
+
 export function QueryData(arg1:view.GridQuery):Promise<store.GridResult>;
 
 export function QueryMasterData(arg1:master.Query):Promise<master.Page>;

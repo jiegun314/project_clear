@@ -273,7 +273,7 @@ export interface AppInfo {
 }
 
 /** Master data: code matching and SAP category maintenance. */
-export type MasterTable = 'item' | 'base' | 'category';
+export type MasterTable = 'item' | 'base' | 'category' | 'price';
 
 export interface MasterRow {
   table: MasterTable;
@@ -283,6 +283,8 @@ export interface MasterRow {
   manuCode?: string;
   sapCode?: string;
   category?: string;
+  material?: string;
+  standardCost?: number | null;
   uncategorized?: boolean;
   orphan?: boolean;
   unused?: boolean;
@@ -313,8 +315,11 @@ export interface MasterOverview {
   uncategorized: number;
   orphanCount: number;
   unusedCategories: number;
+  priceCount: number;
+  priceMissing: number;
   categories: string[];
   lastImportAt: string;
+  lastPriceImportAt: string;
 }
 
 export interface MasterInput {
@@ -325,6 +330,8 @@ export interface MasterInput {
   manuCode: string;
   sapCode: string;
   category: string;
+  material: string;
+  standardCost: number | null;
 }
 
 export interface MasterImportResult {
@@ -336,6 +343,17 @@ export interface MasterImportResult {
   duplicateRows: number;
   orphans: number;
   uncategorized: number;
+  warnings: string[];
+  importedAt: string;
+}
+
+export interface PriceImportResult {
+  path: string;
+  name: string;
+  prices: number;
+  duplicateRows: number;
+  missingCosts: number;
+  skippedRows: number;
   warnings: string[];
   importedAt: string;
 }

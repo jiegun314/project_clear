@@ -26,6 +26,7 @@ import type {
   MasterPage,
   MasterQuery,
   MasterTable,
+  PriceImportResult,
   Status,
 } from '../types';
 
@@ -57,6 +58,7 @@ interface AppBindings {
   SaveMasterRow(input: MasterInput): Promise<void>;
   DeleteMasterRow(table: MasterTable, key: string): Promise<void>;
   ImportMasterWorkbook(): Promise<MasterImportResult | null>;
+  ImportPriceWorkbook(): Promise<PriceImportResult | null>;
   GetLogs(limit: number): Promise<LogEntry[]>;
   ClearLogs(): Promise<void>;
   Quit(): Promise<void>;
@@ -119,6 +121,7 @@ export const api = {
   saveMasterRow: (input: MasterInput) => app().SaveMasterRow(input),
   deleteMasterRow: (table: MasterTable, key: string) => app().DeleteMasterRow(table, key),
   importMasterWorkbook: () => app().ImportMasterWorkbook(),
+  importPriceWorkbook: () => app().ImportPriceWorkbook(),
   getConfig: () => app().GetConfig(),
   saveConfig: (c: AppConfig) => app().SaveConfig(c),
   resetConfig: () => app().ResetConfig(),

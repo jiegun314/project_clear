@@ -93,7 +93,9 @@ const EMPTY: GridResult = { rows: [], total: 0, page: 1, pageSize: 200 };
 const MASTER_OVERVIEW: MasterOverview = {
   itemCount: 5224, baseCount: 5854, sapCount: 1756, categoryCount: 33,
   uncategorized: 1504, orphanCount: 161, unusedCategories: 38,
+  priceCount: 94502, priceMissing: 1024,
   categories: ['A', 'B'], lastImportAt: '2026-11-18 22:00:00',
+  lastPriceImportAt: '2026-11-19 21:30:00',
 };
 
 const MASTER_PAGE: MasterPage = {
